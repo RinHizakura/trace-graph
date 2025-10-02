@@ -19,7 +19,7 @@ where:                                                 \n
     -e  select the event for ftrace                    \n
     -b  select the bio event for ftrace                \n
     -i  select the irq event for ftrace                \n
-    -s  select the sche event for ftrace               \n
+    -s  select the sched event for ftrace              \n
     -p  trace only the run command and its childs' PID"
 
     echo -e $usage
