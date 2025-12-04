@@ -99,13 +99,11 @@ if [[ $PID -eq 1 ]]; then
 fi
 
 echo 1 > $SYSFS_TRACE/tracing_on
-(cat $SYSFS_TRACE/trace_pipe > $OUTPUT) &
-TPID=$!
 wait $CPID
 echo 0 > $SYSFS_TRACE/tracing_on
 
 # Output result
-kill $TPID
+cat $SYSFS_TRACE/trace > $OUTPUT
 echo "Done. Please 'sudo cat $OUTPUT' for the result"
 
 # Cleanup the change of ftrace
