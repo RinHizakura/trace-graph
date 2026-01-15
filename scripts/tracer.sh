@@ -12,12 +12,13 @@ function enable_event()
 
 function print_help()
 {
-    usage="$(basename "$0") [-h] [-o output] [-e event] [-b] [-i] [-s] [-p]  \n
+    usage="$(basename "$0") [-h] [-o output] [-e event] [-b] [-c] [-i] [-s] [-p]  \n
 where:                                                 \n
     -h  show this help text                            \n
     -o  specific the output name of ftrace file        \n
     -e  select the event for ftrace                    \n
     -b  select the bio event for ftrace                \n
+    -c  selec the cpuidle event for ftrace             \n
     -i  select the irq event for ftrace                \n
     -s  select the sched event for ftrace              \n
     -p  trace only the run command and its childs' PID"
@@ -34,7 +35,7 @@ OUTPUT="/tmp/trace_log"
 EVENT=$SYSFS_TRACE/events
 EVENT_LIST=()
 PID=0
-while getopts ":o:e:bisph" opt
+while getopts ":o:e:bcisph" opt
 do
     case $opt in
         o)
@@ -43,6 +44,8 @@ do
             EVENT_LIST+=("$OPTARG");;
         b)
             EVENT_LIST+=("block/block_rq_insert" "block/block_rq_complete");;
+        c)
+            EVENT_LIST+=("power/cpu_idle");;
         i)
             EVENT_LIST+=("irq/irq_handler_entry" "irq/irq_handler_exit");
             EVENT_LIST+=("irq/softirq_entry" "irq/softirq_exit");;

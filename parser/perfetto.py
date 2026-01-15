@@ -143,6 +143,15 @@ def handle_sched_swtich_event(info, cpu, duration, timestamp):
     else:
         return None
 
+def handle_cpu_idle_event(info):
+    d = re.findall(r"state=(\d+) cpu_id=(\d+)", info)[0]
+    state, cpu_id = int(d[0]), int(d[1])
+    if 4294967295 == state:
+        state = 0
+    else:
+        state += 1
+    return f'"CPU{cpu_id:03d}": {state}, '
+
 
 def handle_bio_start_event(info, cpu, duration, timestamp):
     d = re.findall(r"(\d+),(\d+) (\w+) (\d+) \((\w*)\) (\d+) \+ (\d+) \[([\w\/:-]+)\]", info)[
@@ -213,7 +222,7 @@ def parse_ftrace(trace, file):
 
     dur_events = [
         "sched_switch",
-        "suspend_resume",
+        "cpu_idle",
         "irq_handler",
         "softirq",
         "device_pm_callback",
@@ -249,12 +258,18 @@ def parse_ftrace(trace, file):
         # From seconds to milliseconds
         timestamp = int(time * 10**6)
 
+        update_counter = False
+        counter_data = None
         goto_next = False
         exit_info = None
         if event == "sched_switch":
             tid = cpu
             exit_info = handle_sched_swtich_event(info, cpu, duration, timestamp)
             goto_next = False if exit_info else True
+        elif event == "cpu_idle":
+            counter_event = True
+            counter_data = handle_cpu_idle_event(info)
+            update_counter = True if counter_data else False
         elif "block_rq" in event:
             tid = cpu
             if event == "block_rq_insert":
@@ -291,6 +306,8 @@ def parse_ftrace(trace, file):
         if exit_info:
             (name, start, dur) = exit_info
             trace.add_complete_event(name, event, start, dur, tid, f'"info": "{info}"')
+        elif counter_data:
+            trace.add_counter_event(name, event, timestamp, counter_data)
         else:
             trace.add_instant_event(name, event, timestamp, tid, f'"info": "{info}"')
 
