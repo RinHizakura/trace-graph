@@ -258,7 +258,6 @@ def parse_ftrace(trace, file):
         # From seconds to milliseconds
         timestamp = int(time * 10**6)
 
-        update_counter = False
         counter_data = None
         goto_next = False
         exit_info = None
@@ -267,9 +266,7 @@ def parse_ftrace(trace, file):
             exit_info = handle_sched_swtich_event(info, cpu, duration, timestamp)
             goto_next = False if exit_info else True
         elif event == "cpu_idle":
-            counter_event = True
             counter_data = handle_cpu_idle_event(info)
-            update_counter = True if counter_data else False
         elif "block_rq" in event:
             tid = cpu
             if event == "block_rq_insert":
