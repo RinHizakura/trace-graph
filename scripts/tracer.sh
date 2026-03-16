@@ -12,11 +12,12 @@ function enable_event()
 
 function print_help()
 {
-    usage="$(basename "$0") [-h] [-o output] [-e event] [-b] [-c] [-i] [-s] [-p]  \n
+    usage="$(basename "$0") [-h] [-o output] [-e event] [-a] [-b] [-c] [-i] [-s] [-p]  \n
 where:                                                 \n
     -h  show this help text                            \n
     -o  specific the output name of ftrace file        \n
     -e  select the event for ftrace                    \n
+    -a  select all events for ftrace                   \n
     -b  select the bio event for ftrace                \n
     -c  selec the cpuidle event for ftrace             \n
     -i  select the irq event for ftrace                \n
@@ -34,12 +35,15 @@ fi
 OUTPUT="/tmp/trace_log"
 EVENT=$SYSFS_TRACE/events
 EVENT_LIST=()
+ALL_EVENTS=0
 PID=0
-while getopts ":o:e:bcisph" opt
+while getopts ":o:e:bcispah" opt
 do
     case $opt in
         o)
             OUTPUT=("$OPTARG");;
+        a)
+            ALL_EVENTS=1;;
         e)
             EVENT_LIST+=("$OPTARG");;
         b)
@@ -75,14 +79,16 @@ echo 0 > $SYSFS_TRACE/trace
 echo 0 > $SYSFS_TRACE/events/enable
 echo 0 > $SYSFS_TRACE/tracing_on
 
-if [[ ${EVENT_LIST[@]} ]]; then
+if [[ $ALL_EVENTS -eq 1 ]]; then
+    echo Enable all events
+    enable_event ""
+elif [[ ${EVENT_LIST[@]} ]]; then
     for ev in ${EVENT_LIST[@]}; do
         echo Enable event $ev
         enable_event $ev
     done
 else
-    echo Enable all events
-    enable_event ""
+    echo No event is selected
 fi
 
 # Choose the tracer with target setting
