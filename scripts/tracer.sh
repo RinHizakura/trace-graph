@@ -27,11 +27,6 @@ where:                                                 \n
     echo -e $usage
 }
 
-if [[ $EUID -ne 0 ]]; then
-    echo "This script must be run as root user."
-    exit 1
-fi
-
 OUTPUT="/tmp/trace_log"
 EVENT=$SYSFS_TRACE/events
 EVENT_LIST=()
@@ -69,6 +64,11 @@ CMD=$*
 
 if [ "$CMD" == "" ]; then
     print_help
+    exit 1
+fi
+
+if [[ $EUID -ne 0 ]]; then
+    echo "This script must be run as root user."
     exit 1
 fi
 
