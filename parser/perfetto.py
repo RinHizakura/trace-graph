@@ -120,7 +120,7 @@ class PerfettoTraceFile:
 
 def handle_sched_swtich_event(info, cpu, duration, timestamp):
     s = "[\w\<\>\-\.\:\/\(\) ]"
-    regex = rf"prev_comm=({s}+) prev_pid=([0-9\-]+) prev_prio=[0-9\-]+ prev_state=([A-Z\+]+) "
+    regex = rf"prev_comm=({s}+) prev_pid=([0-9\-]+) prev_prio=[0-9\-]+ prev_state=([a-zA-Z\+]+) "
     regex += rf"==> next_comm=({s}+) next_pid=([0-9\-]+) next_prio=[0-9\-]+"
     sched = re.findall(regex, info)[0]
     prev, prev_pid, prev_state, cur, cur_pid = (
