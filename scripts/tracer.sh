@@ -111,8 +111,8 @@ echo 1 > $SYSFS_TRACE/tracing_on
 # Stop error exit temporary to make sure we can get the return code of the command
 set +e
 wait $CPID
-set -e
 ret=$?
+set -e
 echo "Command '$CMD' finished. Return code: $ret"
 echo 0 > $SYSFS_TRACE/tracing_on
 
