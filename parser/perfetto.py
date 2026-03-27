@@ -220,14 +220,10 @@ def parse_ftrace(trace, file):
     # Assume the ftrace format should follow this regular expression
     regex = rf"({s0}+)-(\d+)\s+(\([\d -]+\))\s+\[(\d+)\]\s+({s4}+)\s+(\d+\.\d+):\s+({s6}+):\s({s7}+)"
 
-    dur_events = [
-        "sched_switch",
-        "cpu_idle",
-        "irq_handler",
-        "softirq",
-        "device_pm_callback",
-        "block_rq",
-    ]
+    events = set()
+    cpu_track_events = set(["sched_switch", "cpu_idle", "irq_handler", "softirq", "device_pm_callback", "block_rq"])
+
+    pid_map = {}
 
     # Record the max CPU number during parsing of the ftrace event
     cpu_max = 0
@@ -253,22 +249,28 @@ def parse_ftrace(trace, file):
             items[7],
         )
 
+        events.add(event)
+        pid_map[process_id] = name
+
         cpu_max = max(cpu, cpu_max)
 
         # From seconds to milliseconds
         timestamp = int(time * 10**6)
 
+        if event in cpu_track_events:
+            tid = cpu
+        else:
+            tid = process_id
+
         counter_data = None
         goto_next = False
         exit_info = None
         if event == "sched_switch":
-            tid = cpu
             exit_info = handle_sched_swtich_event(info, cpu, duration, timestamp)
             goto_next = False if exit_info else True
         elif event == "cpu_idle":
             counter_data = handle_cpu_idle_event(info)
         elif "block_rq" in event:
-            tid = cpu
             if event == "block_rq_insert":
                 event = "block_rq"
                 handle_bio_start_event(info, cpu, duration, timestamp)
@@ -277,7 +279,6 @@ def parse_ftrace(trace, file):
                 event = "block_rq"
                 exit_info = handle_bio_end_event(info, cpu, duration, timestamp)
         elif "irq_handler" in event:
-            tid = cpu
             if event == "irq_handler_entry":
                 event = "irq_handler"
                 handle_irq_handler_start_event(info, cpu, duration, timestamp)
@@ -286,7 +287,6 @@ def parse_ftrace(trace, file):
                 event = "irq_handler"
                 exit_info = handle_irq_handler_end_event(info, cpu, duration, timestamp)
         elif "softirq" in event:
-            tid = cpu
             if event == "softirq_entry":
                 event = "softirq"
                 handle_softirq_start_event(info, cpu, duration, timestamp)
@@ -294,8 +294,6 @@ def parse_ftrace(trace, file):
             elif event == "softirq_exit":
                 event = "softirq"
                 exit_info = handle_softirq_end_event(info, cpu, duration, timestamp)
-        else:
-            tid = process_id
 
         if goto_next:
             continue
@@ -311,7 +309,14 @@ def parse_ftrace(trace, file):
     # For the type of events that can have duration information from ftrace, we use CPU as
     # their tid, so they will be drawed to different subtrack according to CPU number.
     # Assign the name for these subtrack for better visualization.
-    for event in dur_events:
+    for event in events:
         track_id = trace.get_track_id(event)
-        for c in range(cpu_max + 1):
-            trace.add_thread_name(f"CPU{c}", track_id, c)
+        if event in cpu_track_events:
+            for c in range(cpu_max + 1):
+                trace.add_thread_name(f"CPU{c}", track_id, c)
+        else:
+            # FIXME: Not every process will have the event, but we assign the same information
+            # for all processes. This may create redundant information for output trace file,
+            # but it is easier to implement.
+            for process_id, name in pid_map.items():
+                trace.add_thread_name(name, track_id, process_id)
