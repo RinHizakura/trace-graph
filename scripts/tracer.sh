@@ -108,7 +108,12 @@ if [[ $PID -eq 1 ]]; then
 fi
 
 echo 1 > $SYSFS_TRACE/tracing_on
+# Stop error exit temporary to make sure we can get the return code of the command
+set +e
 wait $CPID
+set -e
+ret=$?
+echo "Command '$CMD' finished. Return code: $ret"
 echo 0 > $SYSFS_TRACE/tracing_on
 
 # Output result
