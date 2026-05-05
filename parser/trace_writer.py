@@ -104,9 +104,6 @@ class PerfettoTraceFile:
             self._counter_tracks[key] = uuid
         return self._counter_tracks[key]
 
-    def ensure_thread_track(self, cat, tid, thread_name):
-        self._thread_track(cat, tid, thread_name)
-
     def add_counter_event(self, cat, timestamp, counter_name, value):
         track_uuid = self._counter_track(cat, counter_name)
         packet = self._builder.create_packet()
@@ -291,13 +288,6 @@ def parse_ftrace(trace, file):
         # Perfetto wants nanoseconds
         timestamp = int(time * 10**9)
 
-        if event in cpu_track_events:
-            tid = cpu
-            thread_name = f"CPU{cpu}"
-        else:
-            tid = process_id
-            thread_name = name
-
         counter = None
         goto_next = False
         exit_info = None
@@ -331,6 +321,13 @@ def parse_ftrace(trace, file):
                 event = "softirq"
                 exit_info = handle_softirq_end_event(info, cpu, duration, timestamp)
 
+        if event in cpu_track_events:
+            tid = cpu
+            thread_name = f"CPU{cpu}"
+        else:
+            tid = process_id
+            thread_name = name
+
         if goto_next:
             continue
 
@@ -343,12 +340,3 @@ def parse_ftrace(trace, file):
         else:
             trace.add_instant_event(name, event, timestamp, tid, thread_name, info)
 
-    # Pre-register tracks so all CPUs/processes that appeared show up in the UI even
-    # if a particular event category had no entries for them.
-    for event in events:
-        if event in cpu_track_events:
-            for c in range(cpu_max + 1):
-                trace.ensure_thread_track(event, c, f"CPU{c}")
-        else:
-            for process_id, name in pid_map.items():
-                trace.ensure_thread_track(event, process_id, name)
