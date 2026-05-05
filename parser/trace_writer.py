@@ -4,6 +4,14 @@ from perfetto.trace_builder.proto_builder import StreamingTraceProtoBuilder
 from perfetto.protos.perfetto.trace.perfetto_trace_pb2 import TrackEvent
 
 
+def _findall_first(pattern, line):
+    try:
+        return re.findall(pattern, line)[0]
+    except IndexError:
+        print(f"[ERROR] No match for pattern {pattern!r} in line: {line}")
+        raise
+
+
 class DurationTracker:
 
     def __init__(self):
@@ -150,7 +158,7 @@ def handle_sched_swtich_event(info, cpu, duration, timestamp):
     s = "[\w\<\>\-\.\:\/\(\) ]"
     regex = rf"prev_comm=({s}+) prev_pid=([0-9\-]+) prev_prio=[0-9\-]+ prev_state=([a-zA-Z\+]+) "
     regex += rf"==> next_comm=({s}+) next_pid=([0-9\-]+) next_prio=[0-9\-]+"
-    sched = re.findall(regex, info)[0]
+    sched = _findall_first(regex, info)
     prev, prev_pid, prev_state, cur, cur_pid = (
         sched[0],
         int(sched[1]),
@@ -172,7 +180,7 @@ def handle_sched_swtich_event(info, cpu, duration, timestamp):
         return None
 
 def handle_cpu_idle_event(info):
-    d = re.findall(r"state=(\d+) cpu_id=(\d+)", info)[0]
+    d = _findall_first(r"state=(\d+) cpu_id=(\d+)", info)
     state, cpu_id = int(d[0]), int(d[1])
     if 4294967295 == state:
         state = 0
@@ -182,9 +190,7 @@ def handle_cpu_idle_event(info):
 
 
 def handle_bio_start_event(info, cpu, duration, timestamp):
-    d = re.findall(r"(\d+),(\d+) (\w+) (\d+) \((\w*)\) (\d+) \+ (\d+) \[([\w\/:-]+)\]", info)[
-        0
-    ]
+    d = _findall_first(r"(\d+),(\d+) (\w+) (\d+) \((\w*)\) (\d+) \+ (\d+) [\w\d,]+ \[([\w\/:-]+)\]", info)
     major, minor, rwbs, byte, cmd, sector, nr_sector, comm = (
         int(d[0]),
         int(d[1]),
@@ -201,7 +207,7 @@ def handle_bio_start_event(info, cpu, duration, timestamp):
 
 
 def handle_bio_end_event(info, cpu, duration, timestamp):
-    d = re.findall(r"(\d+),(\d+) (\w+) \((\w*)\) (\d+) \+ (\d+) \[(\d+)\]", info)[0]
+    d = _findall_first(r"(\d+),(\d+) (\w+) \((\w*)\) (\d+) \+ (\d+) [\w\d,]+ \[(\d+)\]", info)
     major, minor, rwbs, cmd, sector, nr_sector, err = (
         int(d[0]),
         int(d[1]),
@@ -216,22 +222,22 @@ def handle_bio_end_event(info, cpu, duration, timestamp):
     return exit_info
 
 def handle_irq_handler_start_event(info, cpu, duration, timestamp):
-    d = re.findall(r"irq=([0-9]+) name=([0-9a-zA-Z_\.]+)", info)[0]
+    d = _findall_first(r"irq=([0-9]+) name=([0-9a-zA-Z_\.]+)", info)
     key, data = int(d[0]), d[1]
     duration.entry(f"irq_handler-{key}@{cpu}", (data, timestamp))
 
 def handle_irq_handler_end_event(info, cpu, duration, timestamp):
-    key = int(re.findall(r"irq=([0-9]+)", info)[0])
+    key = int(_findall_first(r"irq=([0-9]+)", info))
     exit_info = duration.exit(f"irq_handler-{key}@{cpu}", timestamp)
     return exit_info
 
 def handle_softirq_start_event(info, cpu, duration, timestamp):
-    d = re.findall(r"vec=([0-9]+) \[action=([A-Z_]+)\]", info)[0]
+    d = _findall_first(r"vec=([0-9]+) \[action=([A-Z_]+)\]", info)
     key, data = int(d[0]), d[1]
     duration.entry(f"softirq-{key}@{cpu}", (data, timestamp))
 
 def handle_softirq_end_event(info, cpu, duration, timestamp):
-    key = int(re.findall(r"vec=([0-9]+)", info)[0])
+    key = int(_findall_first(r"vec=([0-9]+)", info))
     exit_info = duration.exit(f"softirq-{key}@{cpu}", timestamp)
     return exit_info
 
