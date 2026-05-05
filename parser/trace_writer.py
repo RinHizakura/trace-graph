@@ -52,7 +52,7 @@ class PerfettoTraceFile:
         self._next_uuid = 1
         self._next_pid = 1000
         self._process_tracks = {}  # cat -> (uuid, pid)
-        self._thread_tracks = {}   # (cat, tid) -> uuid
+        self._thread_tracks = {}  # (cat, tid) -> uuid
         self._counter_tracks = {}  # (cat, counter_name) -> uuid
 
     def close(self):
@@ -176,6 +176,7 @@ def handle_sched_swtich_event(info, cpu, duration, timestamp):
     else:
         return None
 
+
 def handle_cpu_idle_event(info):
     d = _findall_first(r"state=(\d+) cpu_id=(\d+)", info)
     state, cpu_id = int(d[0]), int(d[1])
@@ -187,7 +188,10 @@ def handle_cpu_idle_event(info):
 
 
 def handle_bio_start_event(info, cpu, duration, timestamp):
-    d = _findall_first(r"(\d+),(\d+) (\w+) (\d+) \((\w*)\) (\d+) \+ (\d+) [\w\d,]+ \[([\w\/:-]+)\]", info)
+    d = _findall_first(
+        r"(\d+),(\d+) (\w+) (\d+) \((\w*)\) (\d+) \+ (\d+) [\w\d,]+ \[([\w\/:-]+)\]",
+        info,
+    )
     major, minor, rwbs, byte, cmd, sector, nr_sector, comm = (
         int(d[0]),
         int(d[1]),
@@ -204,7 +208,9 @@ def handle_bio_start_event(info, cpu, duration, timestamp):
 
 
 def handle_bio_end_event(info, cpu, duration, timestamp):
-    d = _findall_first(r"(\d+),(\d+) (\w+) \((\w*)\) (\d+) \+ (\d+) [\w\d,]+ \[(\d+)\]", info)
+    d = _findall_first(
+        r"(\d+),(\d+) (\w+) \((\w*)\) (\d+) \+ (\d+) [\w\d,]+ \[(\d+)\]", info
+    )
     major, minor, rwbs, cmd, sector, nr_sector, err = (
         int(d[0]),
         int(d[1]),
@@ -218,25 +224,30 @@ def handle_bio_end_event(info, cpu, duration, timestamp):
     exit_info = duration.exit(f"block_rq-{key}@{cpu}", timestamp)
     return exit_info
 
+
 def handle_irq_handler_start_event(info, cpu, duration, timestamp):
     d = _findall_first(r"irq=([0-9]+) name=([0-9a-zA-Z_\.]+)", info)
     key, data = int(d[0]), d[1]
     duration.entry(f"irq_handler-{key}@{cpu}", (data, timestamp))
+
 
 def handle_irq_handler_end_event(info, cpu, duration, timestamp):
     key = int(_findall_first(r"irq=([0-9]+)", info))
     exit_info = duration.exit(f"irq_handler-{key}@{cpu}", timestamp)
     return exit_info
 
+
 def handle_softirq_start_event(info, cpu, duration, timestamp):
     d = _findall_first(r"vec=([0-9]+) \[action=([A-Z_]+)\]", info)
     key, data = int(d[0]), d[1]
     duration.entry(f"softirq-{key}@{cpu}", (data, timestamp))
 
+
 def handle_softirq_end_event(info, cpu, duration, timestamp):
     key = int(_findall_first(r"vec=([0-9]+)", info))
     exit_info = duration.exit(f"softirq-{key}@{cpu}", timestamp)
     return exit_info
+
 
 def parse_ftrace(trace, file):
     # name
@@ -252,7 +263,16 @@ def parse_ftrace(trace, file):
     regex = rf"({s0}+)-(\d+)\s+(\([\d -]+\))\s+\[(\d+)\]\s+({s4}+)\s+(\d+\.\d+):\s+({s6}+):\s({s7}+)"
 
     events = set()
-    cpu_track_events = set(["sched_switch", "cpu_idle", "irq_handler", "softirq", "device_pm_callback", "block_rq"])
+    cpu_track_events = set(
+        [
+            "sched_switch",
+            "cpu_idle",
+            "irq_handler",
+            "softirq",
+            "device_pm_callback",
+            "block_rq",
+        ]
+    )
 
     pid_map = {}
 
@@ -333,10 +353,11 @@ def parse_ftrace(trace, file):
 
         if exit_info:
             (slice_name, start, dur) = exit_info
-            trace.add_complete_event(slice_name, event, start, dur, tid, thread_name, info)
+            trace.add_complete_event(
+                slice_name, event, start, dur, tid, thread_name, info
+            )
         elif counter:
             counter_name, value = counter
             trace.add_counter_event(event, timestamp, counter_name, value)
         else:
             trace.add_instant_event(name, event, timestamp, tid, thread_name, info)
-
