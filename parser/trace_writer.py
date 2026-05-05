@@ -50,10 +50,7 @@ class PerfettoTraceFile:
         self._builder = StreamingTraceProtoBuilder(self._file)
         self._seq_id = 1
         self._next_uuid = 1
-        self._next_pid = 1000
-        self._process_tracks = {}  # cat -> (uuid, pid)
-        self._thread_tracks = {}  # (cat, tid) -> uuid
-        self._counter_tracks = {}  # (cat, counter_name) -> uuid
+        self._tracks = {}  # str key -> uuid
 
     def close(self):
         self._file.close()
@@ -63,49 +60,33 @@ class PerfettoTraceFile:
         self._next_uuid += 1
         return u
 
-    def _process_track(self, cat):
-        if cat not in self._process_tracks:
-            uuid = self._alloc_uuid()
-            pid = self._next_pid
-            self._next_pid += 1
-            packet = self._builder.create_packet()
-            packet.track_descriptor.uuid = uuid
-            packet.track_descriptor.process.pid = pid
-            packet.track_descriptor.process.process_name = cat
-            self._builder.write_packet(packet)
-            self._process_tracks[cat] = (uuid, pid)
-        return self._process_tracks[cat]
+    def make_track(self, key, name=None, parent_key=None, counter=False):
+        """Create or fetch a generic named track identified by a string key.
 
-    def _thread_track(self, cat, tid, thread_name):
-        key = (cat, tid)
-        if key not in self._thread_tracks:
-            (_, pid) = self._process_track(cat)
-            uuid = self._alloc_uuid()
-            packet = self._builder.create_packet()
-            packet.track_descriptor.uuid = uuid
-            packet.track_descriptor.thread.pid = pid
-            packet.track_descriptor.thread.tid = tid
-            packet.track_descriptor.thread.thread_name = thread_name
-            self._builder.write_packet(packet)
-            self._thread_tracks[key] = uuid
-        return self._thread_tracks[key]
+        Tracks form a tree via `parent_key`. If a referenced parent does not
+        yet exist, it is auto-created as a self-named track. Pass
+        `counter=True` to mark the track as a counter track.
+        """
+        if key in self._tracks:
+            return self._tracks[key]
 
-    def _counter_track(self, cat, counter_name):
-        key = (cat, counter_name)
-        if key not in self._counter_tracks:
-            (parent_uuid, _) = self._process_track(cat)
-            uuid = self._alloc_uuid()
-            packet = self._builder.create_packet()
-            packet.track_descriptor.uuid = uuid
+        parent_uuid = None
+        if parent_key is not None:
+            parent_uuid = self.make_track(parent_key)
+
+        uuid = self._alloc_uuid()
+        packet = self._builder.create_packet()
+        packet.track_descriptor.uuid = uuid
+        packet.track_descriptor.name = name if name is not None else key
+        if parent_uuid is not None:
             packet.track_descriptor.parent_uuid = parent_uuid
-            packet.track_descriptor.name = counter_name
+        if counter:
             packet.track_descriptor.counter.SetInParent()
-            self._builder.write_packet(packet)
-            self._counter_tracks[key] = uuid
-        return self._counter_tracks[key]
+        self._builder.write_packet(packet)
+        self._tracks[key] = uuid
+        return uuid
 
-    def add_counter_event(self, cat, timestamp, counter_name, value):
-        track_uuid = self._counter_track(cat, counter_name)
+    def add_counter_event(self, track_uuid, timestamp, value):
         packet = self._builder.create_packet()
         packet.timestamp = timestamp
         packet.track_event.type = TrackEvent.TYPE_COUNTER
@@ -114,8 +95,7 @@ class PerfettoTraceFile:
         packet.trusted_packet_sequence_id = self._seq_id
         self._builder.write_packet(packet)
 
-    def add_instant_event(self, name, cat, timestamp, tid, thread_name, info):
-        track_uuid = self._thread_track(cat, tid, thread_name)
+    def add_instant_event(self, track_uuid, name, timestamp, info):
         packet = self._builder.create_packet()
         packet.timestamp = timestamp
         packet.track_event.type = TrackEvent.TYPE_INSTANT
@@ -128,9 +108,7 @@ class PerfettoTraceFile:
         packet.trusted_packet_sequence_id = self._seq_id
         self._builder.write_packet(packet)
 
-    def add_complete_event(self, name, cat, timestamp, dur, tid, thread_name, info):
-        track_uuid = self._thread_track(cat, tid, thread_name)
-
+    def add_complete_event(self, track_uuid, name, timestamp, dur, info):
         packet = self._builder.create_packet()
         packet.timestamp = timestamp
         packet.track_event.type = TrackEvent.TYPE_SLICE_BEGIN
@@ -341,23 +319,29 @@ def parse_ftrace(trace, file):
                 event = "softirq"
                 exit_info = handle_softirq_end_event(info, cpu, duration, timestamp)
 
-        if event in cpu_track_events:
-            tid = cpu
-            thread_name = f"CPU{cpu}"
-        else:
-            tid = process_id
-            thread_name = name
-
         if goto_next:
             continue
 
+        if event in cpu_track_events:
+            track_key = f"{event}/CPU{cpu}"
+            track_uuid = trace.make_track(
+                track_key, name=f"CPU{cpu}", parent_key=event
+            )
+        else:
+            track_key = f"thread:{process_id}"
+            track_uuid = trace.make_track(track_key, name=f"{name}-{process_id}")
+
         if exit_info:
             (slice_name, start, dur) = exit_info
-            trace.add_complete_event(
-                slice_name, event, start, dur, tid, thread_name, info
-            )
+            trace.add_complete_event(track_uuid, slice_name, start, dur, info)
         elif counter:
             counter_name, value = counter
-            trace.add_counter_event(event, timestamp, counter_name, value)
+            counter_uuid = trace.make_track(
+                f"{event}/{counter_name}",
+                name=counter_name,
+                parent_key=event,
+                counter=True,
+            )
+            trace.add_counter_event(counter_uuid, timestamp, value)
         else:
-            trace.add_instant_event(name, event, timestamp, tid, thread_name, info)
+            trace.add_instant_event(track_uuid, name, timestamp, info)
