@@ -1,22 +1,7 @@
 import re
-from datetime import datetime, timedelta
 
-
-# FIXME: This is a Naive id allocator. We assume the event count won't exceed
-# the numerical system range, so never reclaim the unused id.
-class TrackIdAllocator:
-
-    def __init__(self, start_pid):
-        self.map = {}
-        self.next_pid = start_pid
-
-    def get(self, name):
-        assign = False
-        if not name in self.map:
-            self.map[name] = self.next_pid
-            self.next_pid += 1
-            assign = True
-        return assign, self.map[name]
+from perfetto.trace_builder.proto_builder import StreamingTraceProtoBuilder
+from perfetto.protos.perfetto.trace.perfetto_trace_pb2 import TrackEvent
 
 
 class DurationTracker:
@@ -53,69 +38,112 @@ class DurationTracker:
 class PerfettoTraceFile:
 
     def __init__(self, filename):
-        self.output = open(filename, "w")
-        self.track_ids = TrackIdAllocator(1000)
+        self._file = open(filename, "wb")
+        self._builder = StreamingTraceProtoBuilder(self._file)
+        self._seq_id = 1
+        self._next_uuid = 1
+        self._next_pid = 1000
+        self._process_tracks = {}  # cat -> (uuid, pid)
+        self._thread_tracks = {}   # (cat, tid) -> uuid
+        self._counter_tracks = {}  # (cat, counter_name) -> uuid
 
-    def get_track_id(self, cat):
-        assign, pid = self.track_ids.get(cat)
-        if assign:
-            self.add_process_name(cat, pid)
-        return pid
+    def close(self):
+        self._file.close()
 
-    def start(self):
-        self.output.write("{\n")
+    def _alloc_uuid(self):
+        u = self._next_uuid
+        self._next_uuid += 1
+        return u
 
-    def end(self):
-        self.output.write("}\n")
-        self.output.close()
+    def _process_track(self, cat):
+        if cat not in self._process_tracks:
+            uuid = self._alloc_uuid()
+            pid = self._next_pid
+            self._next_pid += 1
+            packet = self._builder.create_packet()
+            packet.track_descriptor.uuid = uuid
+            packet.track_descriptor.process.pid = pid
+            packet.track_descriptor.process.process_name = cat
+            self._builder.write_packet(packet)
+            self._process_tracks[cat] = (uuid, pid)
+        return self._process_tracks[cat]
 
-    def trace_event_start(self):
-        self.output.write('"traceEvents":[\n')
+    def _thread_track(self, cat, tid, thread_name):
+        key = (cat, tid)
+        if key not in self._thread_tracks:
+            (_, pid) = self._process_track(cat)
+            uuid = self._alloc_uuid()
+            packet = self._builder.create_packet()
+            packet.track_descriptor.uuid = uuid
+            packet.track_descriptor.thread.pid = pid
+            packet.track_descriptor.thread.tid = tid
+            packet.track_descriptor.thread.thread_name = thread_name
+            self._builder.write_packet(packet)
+            self._thread_tracks[key] = uuid
+        return self._thread_tracks[key]
 
-    def trace_event_end(self):
-        self.output.write("]\n")
+    def _counter_track(self, cat, counter_name):
+        key = (cat, counter_name)
+        if key not in self._counter_tracks:
+            (parent_uuid, _) = self._process_track(cat)
+            uuid = self._alloc_uuid()
+            packet = self._builder.create_packet()
+            packet.track_descriptor.uuid = uuid
+            packet.track_descriptor.parent_uuid = parent_uuid
+            packet.track_descriptor.name = counter_name
+            packet.track_descriptor.counter.SetInParent()
+            self._builder.write_packet(packet)
+            self._counter_tracks[key] = uuid
+        return self._counter_tracks[key]
 
-    def add_counter_event(self, name, cat, timestamp, data):
-        pid = self.get_track_id(cat)
+    def ensure_thread_track(self, cat, tid, thread_name):
+        self._thread_track(cat, tid, thread_name)
 
-        self.output.write(
-            '{"name": "%s", "ph": "C", "ts": %d, "cat": "%s", "pid": %d, "args": {%s}}\n'
-            % (name, timestamp, cat, pid, data)
-        )
+    def add_counter_event(self, cat, timestamp, counter_name, value):
+        track_uuid = self._counter_track(cat, counter_name)
+        packet = self._builder.create_packet()
+        packet.timestamp = timestamp
+        packet.track_event.type = TrackEvent.TYPE_COUNTER
+        packet.track_event.track_uuid = track_uuid
+        packet.track_event.counter_value = value
+        packet.trusted_packet_sequence_id = self._seq_id
+        self._builder.write_packet(packet)
 
-    def add_instant_event(self, name, cat, timestamp, tid, data):
-        pid = self.get_track_id(cat)
+    def add_instant_event(self, name, cat, timestamp, tid, thread_name, info):
+        track_uuid = self._thread_track(cat, tid, thread_name)
+        packet = self._builder.create_packet()
+        packet.timestamp = timestamp
+        packet.track_event.type = TrackEvent.TYPE_INSTANT
+        packet.track_event.track_uuid = track_uuid
+        packet.track_event.name = name
+        if info:
+            ann = packet.track_event.debug_annotations.add()
+            ann.name = "info"
+            ann.string_value = info
+        packet.trusted_packet_sequence_id = self._seq_id
+        self._builder.write_packet(packet)
 
-        self.output.write(
-            '{"name": "%s", "ph": "i", "ts": %d, "cat": "%s", "pid": %d, "tid": %d, "s": "t", "args": {%s}}\n'
-            % (name, timestamp, cat, pid, tid, data)
-        )
+    def add_complete_event(self, name, cat, timestamp, dur, tid, thread_name, info):
+        track_uuid = self._thread_track(cat, tid, thread_name)
 
-    def add_complete_event(self, name, cat, timestamp, dur, tid, data):
-        pid = self.get_track_id(cat)
+        packet = self._builder.create_packet()
+        packet.timestamp = timestamp
+        packet.track_event.type = TrackEvent.TYPE_SLICE_BEGIN
+        packet.track_event.track_uuid = track_uuid
+        packet.track_event.name = name
+        if info:
+            ann = packet.track_event.debug_annotations.add()
+            ann.name = "info"
+            ann.string_value = info
+        packet.trusted_packet_sequence_id = self._seq_id
+        self._builder.write_packet(packet)
 
-        self.output.write(
-            '{"name": "%s", "ph": "X", "ts": %d, "dur": %d, "cat": "%s", "pid": %d, "tid": %d, "args": {%s}}\n'
-            % (name, timestamp, dur, cat, pid, tid, data)
-        )
-
-    def add_process_name(self, name, pid):
-        self.output.write(
-            '{"name": "process_name", "ph": "M", "pid": %d, "args": {"name" : "%s"}}\n'
-            % (pid, name)
-        )
-
-    def add_thread_name(self, name, pid, tid):
-        self.output.write(
-            '{"name": "thread_name", "ph": "M", "pid": %d, "tid": %d, "args": {"name" : "%s"}}\n'
-            % (pid, tid, name)
-        )
-
-    def add_process_sortidx(self, idx, pid):
-        self.output.write(
-            '{"name": "process_sort_index", "ph": "M", "pid": %d, "args": {"sort_index" : %d}}\n'
-            % (pid, idx)
-        )
+        packet = self._builder.create_packet()
+        packet.timestamp = timestamp + dur
+        packet.track_event.type = TrackEvent.TYPE_SLICE_END
+        packet.track_event.track_uuid = track_uuid
+        packet.trusted_packet_sequence_id = self._seq_id
+        self._builder.write_packet(packet)
 
 
 def handle_sched_swtich_event(info, cpu, duration, timestamp):
@@ -150,7 +178,7 @@ def handle_cpu_idle_event(info):
         state = 0
     else:
         state += 1
-    return f'"CPU{cpu_id:03d}": {state}, '
+    return (f"CPU{cpu_id:03d}", state)
 
 
 def handle_bio_start_event(info, cpu, duration, timestamp):
@@ -254,22 +282,24 @@ def parse_ftrace(trace, file):
 
         cpu_max = max(cpu, cpu_max)
 
-        # From seconds to milliseconds
-        timestamp = int(time * 10**6)
+        # Perfetto wants nanoseconds
+        timestamp = int(time * 10**9)
 
         if event in cpu_track_events:
             tid = cpu
+            thread_name = f"CPU{cpu}"
         else:
             tid = process_id
+            thread_name = name
 
-        counter_data = None
+        counter = None
         goto_next = False
         exit_info = None
         if event == "sched_switch":
             exit_info = handle_sched_swtich_event(info, cpu, duration, timestamp)
             goto_next = False if exit_info else True
         elif event == "cpu_idle":
-            counter_data = handle_cpu_idle_event(info)
+            counter = handle_cpu_idle_event(info)
         elif "block_rq" in event:
             if event == "block_rq_insert":
                 event = "block_rq"
@@ -299,24 +329,20 @@ def parse_ftrace(trace, file):
             continue
 
         if exit_info:
-            (name, start, dur) = exit_info
-            trace.add_complete_event(name, event, start, dur, tid, f'"info": "{info}"')
-        elif counter_data:
-            trace.add_counter_event(name, event, timestamp, counter_data)
+            (slice_name, start, dur) = exit_info
+            trace.add_complete_event(slice_name, event, start, dur, tid, thread_name, info)
+        elif counter:
+            counter_name, value = counter
+            trace.add_counter_event(event, timestamp, counter_name, value)
         else:
-            trace.add_instant_event(name, event, timestamp, tid, f'"info": "{info}"')
+            trace.add_instant_event(name, event, timestamp, tid, thread_name, info)
 
-    # For the type of events that can have duration information from ftrace, we use CPU as
-    # their tid, so they will be drawed to different subtrack according to CPU number.
-    # Assign the name for these subtrack for better visualization.
+    # Pre-register tracks so all CPUs/processes that appeared show up in the UI even
+    # if a particular event category had no entries for them.
     for event in events:
-        track_id = trace.get_track_id(event)
         if event in cpu_track_events:
             for c in range(cpu_max + 1):
-                trace.add_thread_name(f"CPU{c}", track_id, c)
+                trace.ensure_thread_track(event, c, f"CPU{c}")
         else:
-            # FIXME: Not every process will have the event, but we assign the same information
-            # for all processes. This may create redundant information for output trace file,
-            # but it is easier to implement.
             for process_id, name in pid_map.items():
-                trace.add_thread_name(name, track_id, process_id)
+                trace.ensure_thread_track(event, process_id, name)
