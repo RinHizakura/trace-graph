@@ -6,7 +6,7 @@ Trace-graph is a tool for leveraging time-sampling event traces on Linux systems
 and plotting them on the [Perfetto UI](https://ui.perfetto.dev/) for visual analysis.
 
 For example, run the following command to capture the scheduler ftrace and convert it
-to the special JSON format.
+to the special JSON format([Chrome JSON format](https://perfetto.dev/docs/getting-started/other-formats#chrome-json-format)).
 ```
 $ sudo scripts/tracer.sh -o trace.log -s "sleep 5"
 $ parser/main.py trace.log --output trace.json
