@@ -130,9 +130,11 @@ class PerfettoTraceFile:
 
 
 def handle_sched_swtich_event(info, cpu, duration, timestamp):
-    s = "[\w\<\>\-\.\:\/\(\) ]"
-    regex = rf"prev_comm=({s}+) prev_pid=([0-9\-]+) prev_prio=[0-9\-]+ prev_state=([a-zA-Z\+]+) "
-    regex += rf"==> next_comm=({s}+) next_pid=([0-9\-]+) next_prio=[0-9\-]+"
+    s = r"[\w<>\-.:/() ]"
+    regex = (
+        rf"prev_comm=({s}+) prev_pid=(-?\d+) prev_prio=\S+ prev_state=(\S+) "
+        rf"==> next_comm=({s}+) next_pid=(-?\d+) next_prio=\S+"
+    )
     sched = _findall_first(regex, info)
     prev, prev_pid, prev_state, cur, cur_pid = (
         sched[0],
@@ -167,7 +169,7 @@ def handle_cpu_idle_event(info):
 
 def handle_bio_start_event(info, cpu, duration, timestamp):
     d = _findall_first(
-        r"(\d+),(\d+) (\w+) (\d+) \((\w*)\) (\d+) \+ (\d+) [\w\d,]+ \[([\w\/:-]+)\]",
+        r"(\d+),(\d+) (\w+) (\d+) \((\w*)\) (\d+) \+ (\d+) [\w,]+ \[([\w/:-]+)\]",
         info,
     )
     major, minor, rwbs, byte, cmd, sector, nr_sector, comm = (
@@ -187,7 +189,7 @@ def handle_bio_start_event(info, cpu, duration, timestamp):
 
 def handle_bio_end_event(info, cpu, duration, timestamp):
     d = _findall_first(
-        r"(\d+),(\d+) (\w+) \((\w*)\) (\d+) \+ (\d+) [\w\d,]+ \[(\d+)\]", info
+        r"(\d+),(\d+) (\w+) \((\w*)\) (\d+) \+ (\d+) [\w,]+ \[(\d+)\]", info
     )
     major, minor, rwbs, cmd, sector, nr_sector, err = (
         int(d[0]),
@@ -204,41 +206,33 @@ def handle_bio_end_event(info, cpu, duration, timestamp):
 
 
 def handle_irq_handler_start_event(info, cpu, duration, timestamp):
-    d = _findall_first(r"irq=([0-9]+) name=([0-9a-zA-Z_\.]+)", info)
+    d = _findall_first(r"irq=(\d+) name=([\w.]+)", info)
     key, data = int(d[0]), d[1]
     duration.entry(f"irq_handler-{key}@{cpu}", (data, timestamp))
 
 
 def handle_irq_handler_end_event(info, cpu, duration, timestamp):
-    key = int(_findall_first(r"irq=([0-9]+)", info))
+    key = int(_findall_first(r"irq=(\d+)", info))
     exit_info = duration.exit(f"irq_handler-{key}@{cpu}", timestamp)
     return exit_info
 
 
 def handle_softirq_start_event(info, cpu, duration, timestamp):
-    d = _findall_first(r"vec=([0-9]+) \[action=([A-Z_]+)\]", info)
+    d = _findall_first(r"vec=(\d+) \[action=([A-Z_]+)\]", info)
     key, data = int(d[0]), d[1]
     duration.entry(f"softirq-{key}@{cpu}", (data, timestamp))
 
 
 def handle_softirq_end_event(info, cpu, duration, timestamp):
-    key = int(_findall_first(r"vec=([0-9]+)", info))
+    key = int(_findall_first(r"vec=(\d+)", info))
     exit_info = duration.exit(f"softirq-{key}@{cpu}", timestamp)
     return exit_info
 
 
 def parse_ftrace(trace, file):
-    # name
-    s0 = "[\w\<\>\-\.\:\/\(\) ]"
-    # stat
-    s4 = "[\w\.]"
-    # event
-    s6 = "[\w]"
-    # info
-    s7 = "[\<\>\(\)\[\]a-zA-Z0-9@\+\-\_\.\:\/=, ]"
-
-    # Assume the ftrace format should follow this regular expression
-    regex = rf"({s0}+)-(\d+)\s+(\([\d -]+\))\s+\[(\d+)\]\s+({s4}+)\s+(\d+\.\d+):\s+({s6}+):\s({s7}+)"
+    # ftrace line: name-pid (tgid) [cpu] stat time: event: info
+    name = r"[\w<>\-.:/() ]"
+    regex = rf"({name}+)-(\d+)\s+(\([\d -]+\))\s+\[(\d+)\]\s+([\w.]+)\s+(\d+\.\d+):\s+(\w+):\s(.+)"
 
     events = set()
     cpu_track_events = set(
