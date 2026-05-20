@@ -62,7 +62,7 @@ function ftrace_sampler()
 
 function print_help()
 {
-    usage="$(basename "$0") [-h] [-o output] [-e event] [-a] [-b] [-c] [-i] [-s] [-p] [-t cmd] \n
+    usage="$(basename "$0") [-h] [-o output] [-e event] [-a] [-b] [-c] [-i] [-s] [-p] [-t cmd] [--ss] [--netstat] [--interrupts] \n
 where:                                                 \n
     -h  show this help text                            \n
     -o  specify the output directory (default /tmp/trace_log) \n
@@ -73,10 +73,20 @@ where:                                                 \n
     -i  select the irq event for ftrace                \n
     -s  select the sched event for ftrace              \n
     -p  trace only the run command and its childs' PID \n
-    -t  run this tracer helper alongside the target command (repeatable)"
+    -t  run this tracer helper alongside the target command (repeatable) \n
+\n
+convenience tracers (run a bundled helper and convert it to a counter at the end): \n
+    --ss          sample TCP socket stats (ss -tin)    \n
+    --netstat     sample /proc/net/netstat             \n
+    --interrupts  sample /proc/interrupts              \n
+\n
+Use -t for any custom helper; the long options above are shorthand for the bundled ones."
 
     echo -e $usage
 }
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+HELPERS_DIR="$SCRIPT_DIR/../helpers"
 
 OUTPUT="/tmp/trace_log"
 EVENT=$SYSFS_TRACE/events
@@ -84,9 +94,20 @@ EVENT_LIST=()
 ALL_EVENTS=0
 PID=0
 TRACERS=()
-while getopts ":o:e:t:bcispah" opt
+SAMPLE_SS=0
+SAMPLE_NETSTAT=0
+SAMPLE_IRQ=0
+while getopts ":o:e:t:bcispah-:" opt
 do
     case $opt in
+        -)
+            case "$OPTARG" in
+                ss) SAMPLE_SS=1;;
+                netstat) SAMPLE_NETSTAT=1;;
+                interrupts) SAMPLE_IRQ=1;;
+                help) print_help; exit 0;;
+                *) echo "Unknown option --$OPTARG" >&2; print_help; exit 1;;
+            esac;;
         o)
             OUTPUT="$OPTARG";;
         a)
@@ -129,6 +150,26 @@ fi
 rm -rf "$OUTPUT"
 mkdir -p "$OUTPUT"
 FTRACE_OUTPUT="$OUTPUT/ftrace.log"
+
+# Translate the convenience long options into a bundled sampler (run alongside
+# the target via the same -t machinery) plus a parse step run after it stops.
+POST_PARSE=()
+COUNTER_GLOBS=()
+if [[ $SAMPLE_SS -eq 1 ]]; then
+    TRACERS+=("$HELPERS_DIR/ss/ss_sampler.sh -o $OUTPUT/ss.raw -p 1")
+    POST_PARSE+=("$HELPERS_DIR/ss/ss_parser.py -i $OUTPUT/ss.raw -o $OUTPUT")
+    COUNTER_GLOBS+=("'ss_*.counter'")
+fi
+if [[ $SAMPLE_NETSTAT -eq 1 ]]; then
+    TRACERS+=("$HELPERS_DIR/netstat/netstat_sampler.sh -o $OUTPUT/netstat.raw -p 1")
+    POST_PARSE+=("$HELPERS_DIR/netstat/netstat_parser.py -i $OUTPUT/netstat.raw -o $OUTPUT")
+    COUNTER_GLOBS+=("'netstat.counter'")
+fi
+if [[ $SAMPLE_IRQ -eq 1 ]]; then
+    TRACERS+=("$HELPERS_DIR/interrupts/interrupts_sampler.sh -o $OUTPUT/interrupts.raw -p 1")
+    POST_PARSE+=("$HELPERS_DIR/interrupts/interrupts_parser.py -i $OUTPUT/interrupts.raw -o $OUTPUT")
+    COUNTER_GLOBS+=("'interrupts.counter'")
+fi
 
 FTRACE=0
 if [[ $ALL_EVENTS -eq 1 || ${#EVENT_LIST[@]} -gt 0 ]]; then
@@ -174,9 +215,22 @@ if [[ ${#TRACER_PIDS[@]} -gt 0 ]]; then
     echo "Tracers stopped."
 fi
 
+# Convert the bundled samplers' raw files into general_counter files.
+for parse in "${POST_PARSE[@]}"; do
+    echo "Parsing: $parse"
+    eval "$parse"
+done
+
 if [[ $FTRACE -eq 1 ]]; then
     ftrace_sampler stop
     echo "ftrace sampler stopped. Output: $FTRACE_OUTPUT"
 fi
 
 echo "Done. Please find $OUTPUT for the trace log."
+
+counter_args=""
+for glob in "${COUNTER_GLOBS[@]}"; do
+    counter_args+=" --counter $glob"
+done
+echo "To plot in the Perfetto trace viewer run:"
+echo "  parser/main.py $OUTPUT$counter_args --output trace.pftrace"
