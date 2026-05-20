@@ -10,26 +10,6 @@ function enable_event()
     echo 1 > $SYSFS_TRACE/events/$EVENT/enable
 }
 
-function net_sampler()
-{
-    local ss_out=$1
-    local netstat_out=$2
-    local period=$3
-    while true; do
-        local ts
-        ts=$(awk '{print $1}' /proc/uptime)
-        {
-            echo "@TS $ts"
-            ss -tin 2>/dev/null
-        } >> "$ss_out"
-        {
-            echo "@TS $ts"
-            cat /proc/net/netstat
-        } >> "$netstat_out"
-        sleep "$period"
-    done
-}
-
 function ftrace_sampler()
 {
     local phase=$1
@@ -82,7 +62,7 @@ function ftrace_sampler()
 
 function print_help()
 {
-    usage="$(basename "$0") [-h] [-o output] [-e event] [-a] [-b] [-c] [-i] [-s] [-p] [-n]  \n
+    usage="$(basename "$0") [-h] [-o output] [-e event] [-a] [-b] [-c] [-i] [-s] [-p] [-t cmd] \n
 where:                                                 \n
     -h  show this help text                            \n
     -o  specify the output directory (default /tmp/trace_log) \n
@@ -93,7 +73,7 @@ where:                                                 \n
     -i  select the irq event for ftrace                \n
     -s  select the sched event for ftrace              \n
     -p  trace only the run command and its childs' PID \n
-    -n  sample network status every 1s into <output>/ss.log and <output>/netstat.log"
+    -t  run this tracer helper alongside the target command (repeatable)"
 
     echo -e $usage
 }
@@ -103,9 +83,8 @@ EVENT=$SYSFS_TRACE/events
 EVENT_LIST=()
 ALL_EVENTS=0
 PID=0
-NET=0
-NET_PERIOD=1
-while getopts ":o:e:bcispahn" opt
+TRACERS=()
+while getopts ":o:e:t:bcispah" opt
 do
     case $opt in
         o)
@@ -125,8 +104,8 @@ do
             EVENT_LIST+=("sched/sched_switch");;
         p)
             PID=1;;
-        n)
-            NET=1;;
+        t)
+            TRACERS+=("$OPTARG");;
         h)
             print_help; exit 0;;
         ?)
@@ -150,8 +129,6 @@ fi
 rm -rf "$OUTPUT"
 mkdir -p "$OUTPUT"
 FTRACE_OUTPUT="$OUTPUT/ftrace.log"
-SS_OUTPUT="$OUTPUT/ss.log"
-NETSTAT_OUTPUT="$OUTPUT/netstat.log"
 
 FTRACE=0
 if [[ $ALL_EVENTS -eq 1 || ${#EVENT_LIST[@]} -gt 0 ]]; then
@@ -173,11 +150,12 @@ if [[ $FTRACE -eq 1 ]]; then
     ftrace_sampler start $CPID
 fi
 
-NET_PID=
-if [[ $NET -eq 1 ]]; then
-    net_sampler "$SS_OUTPUT" "$NETSTAT_OUTPUT" "$NET_PERIOD" &
-    NET_PID=$!
-fi
+TRACER_PIDS=()
+for tracer in "${TRACERS[@]}"; do
+    eval "$tracer" &
+    TRACER_PIDS+=($!)
+    echo "Started tracer '$tracer' pid=${TRACER_PIDS[-1]}"
+done
 
 # Stop error exit temporary to make sure we can get the return code of the command
 set +e
@@ -186,11 +164,14 @@ ret=$?
 set -e
 echo "Command '$CMD' finished. Return code: $ret"
 
-# Stop the sampler and output the result
-if [[ -n "$NET_PID" ]]; then
-    kill "$NET_PID" 2>/dev/null || true
-    wait "$NET_PID" 2>/dev/null || true
-    echo "Network sampler stopped. ss=$SS_OUTPUT netstat=$NETSTAT_OUTPUT"
+for pid in "${TRACER_PIDS[@]}"; do
+    kill "$pid" 2>/dev/null || true
+done
+for pid in "${TRACER_PIDS[@]}"; do
+    wait "$pid" 2>/dev/null || true
+done
+if [[ ${#TRACER_PIDS[@]} -gt 0 ]]; then
+    echo "Tracers stopped."
 fi
 
 if [[ $FTRACE -eq 1 ]]; then
@@ -198,4 +179,4 @@ if [[ $FTRACE -eq 1 ]]; then
     echo "ftrace sampler stopped. Output: $FTRACE_OUTPUT"
 fi
 
-echo "Done. Please find $OUTPUT for the trace log and network status."
+echo "Done. Please find $OUTPUT for the trace log."

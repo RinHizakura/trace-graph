@@ -9,8 +9,8 @@ For example, run the following command to capture the scheduler ftrace and conve
 to the native Perfetto trace format
 ([synthetic track event](https://perfetto.dev/docs/reference/synthetic-track-event)).
 ```
-$ sudo scripts/tracer.sh -o trace.log -s "sleep 5"
-$ parser/main.py trace.log --output trace.pftrace
+$ sudo scripts/tracer.sh -o trace_output -s "sleep 5"
+$ parser/main.py trace_output --output trace.pftrace
 ```
 
 Then you can put `trace.pftrace` in [Perfetto UI](https://ui.perfetto.dev/) for visualization.
@@ -39,3 +39,58 @@ Trace-graph exists for two cases where owning the parser pays off:
    tracks. For example, interrupts can be grouped by IRQ number (one track per
    device) instead of by the CPU they fired on, depending on what you are
    investigating. Pick whichever grouping fits the question at hand.
+
+## general_counter format
+
+Any file whose rows look like
+
+```
+# col1,col2,col3
+[<seconds>] v1,v2,v3
+[<seconds>] v1,v2,v3
+```
+
+can be plotted as counter tracks. The leading `# ...` header line names the
+columns (otherwise they fall back to `v1, v2, ...`); every column becomes one
+counter track grouped under `counter/<file basename>`.
+
+Pass each file with `--counter`. The argument is resolved against the input
+directory and accepts globs. For example:
+
+```
+$ parser/main.py trace_output --counter 'ss_*.counter'
+```
+
+## Tracer helpers
+
+`tracer.sh -t` accepts a *tracer*: a small daemon that collects some kind of
+useful, time-aligned data alongside the ftrace. Each `-t` is repeatable, runs
+in the background while the target command executes, and is stopped when the
+target exits. Today the only built-in tracer is the network sampler pair
+below, but the same `-t` slot is intended to host more helpers over time.
+
+### Network sampling
+
+Network state is collected in two steps to keep the sampling loop cheap.
+
+1. **Sample raw snapshots.** Each sampler writes one `@TS`-delimited raw file.
+   Hand them to `tracer.sh` with `-t` (repeatable) — they run in the
+   background alongside the target command and are stopped when it exits:
+
+   ```
+   $ sudo scripts/tracer.sh -s -o trace_output \
+       -t "helpers/ss/ss_sampler.sh -o trace_output/ss.raw -p 1" \
+       -t "helpers/netstat/netstat_sampler.sh -o trace_output/netstat.raw -p 1" \
+       "sleep 5"
+   ```
+
+2. **Convert raw to general_counter.** Each parser reads one raw file and
+   writes counter files into the output directory:
+
+   ```
+   $ helpers/ss/ss_parser.py -i trace_output/ss.raw -o trace_output
+   $ helpers/netstat/netstat_parser.py -i trace_output/netstat.raw -o trace_output
+   $ parser/main.py trace_output --counter 'netstat.counter' --counter 'ss_*.counter'
+   ```
+
+
