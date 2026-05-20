@@ -41,10 +41,9 @@ class DurationTracker:
 
 
 def handle_sched_swtich_event(info, cpu, duration, timestamp):
-    s = r"[\w<>\-.:/() ]"
     regex = (
-        rf"prev_comm=({s}+) prev_pid=(-?\d+) prev_prio=\S+ prev_state=(\S+) "
-        rf"==> next_comm=({s}+) next_pid=(-?\d+) next_prio=\S+"
+        r"prev_comm=(.+?) prev_pid=(-?\d+) prev_prio=\S+ prev_state=(\S+) "
+        r"==> next_comm=(.+?) next_pid=(-?\d+) next_prio=\S+"
     )
     sched = _findall_first(regex, info)
     prev, prev_pid, prev_state, cur, cur_pid = (
