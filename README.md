@@ -77,7 +77,7 @@ target and convert its raw file into a counter once the target exits, printing
 the exact `parser/main.py` command to plot the result:
 
 ```
-$ sudo scripts/tracer.sh -s --ss --netstat --interrupts -o trace_output "sleep 5"
+$ sudo scripts/tracer.sh -s --ss --netstat --interrupts --diskstats -o trace_output "sleep 5"
 ```
 
 | Option         | Samples              | Produces                 |
@@ -85,6 +85,7 @@ $ sudo scripts/tracer.sh -s --ss --netstat --interrupts -o trace_output "sleep 5
 | `--ss`         | `ss -tin`            | `ss_*.counter`           |
 | `--netstat`    | `/proc/net/netstat`  | `netstat.counter`        |
 | `--interrupts` | `/proc/interrupts`   | `interrupts.counter`     |
+| `--diskstats`  | `/proc/diskstats`    | `diskstats_*.counter`    |
 
 The verbose `-t` form documented below stays available for custom helpers or
 non-default sampling periods.

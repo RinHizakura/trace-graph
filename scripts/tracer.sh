@@ -62,7 +62,7 @@ function ftrace_sampler()
 
 function print_help()
 {
-    usage="$(basename "$0") [-h] [-o output] [-e event] [-a] [-b] [-c] [-i] [-s] [-p] [-t cmd] [--ss] [--netstat] [--interrupts] \n
+    usage="$(basename "$0") [-h] [-o output] [-e event] [-a] [-b] [-c] [-i] [-s] [-p] [-t cmd] [--ss] [--netstat] [--interrupts] [--diskstats] \n
 where:                                                 \n
     -h  show this help text                            \n
     -o  specify the output directory (default /tmp/trace_log) \n
@@ -79,6 +79,7 @@ convenience tracers (run a bundled helper and convert it to a counter at the end
     --ss          sample TCP socket stats (ss -tin)    \n
     --netstat     sample /proc/net/netstat             \n
     --interrupts  sample /proc/interrupts              \n
+    --diskstats   sample /proc/diskstats               \n
 \n
 Use -t for any custom helper; the long options above are shorthand for the bundled ones."
 
@@ -97,6 +98,7 @@ TRACERS=()
 SAMPLE_SS=0
 SAMPLE_NETSTAT=0
 SAMPLE_IRQ=0
+SAMPLE_DISKSTATS=0
 while getopts ":o:e:t:bcispah-:" opt
 do
     case $opt in
@@ -105,6 +107,7 @@ do
                 ss) SAMPLE_SS=1;;
                 netstat) SAMPLE_NETSTAT=1;;
                 interrupts) SAMPLE_IRQ=1;;
+                diskstats) SAMPLE_DISKSTATS=1;;
                 help) print_help; exit 0;;
                 *) echo "Unknown option --$OPTARG" >&2; print_help; exit 1;;
             esac;;
@@ -169,6 +172,11 @@ if [[ $SAMPLE_IRQ -eq 1 ]]; then
     TRACERS+=("$HELPERS_DIR/interrupts/interrupts_sampler.sh -o $OUTPUT/interrupts.raw -p 1")
     POST_PARSE+=("$HELPERS_DIR/interrupts/interrupts_parser.py -i $OUTPUT/interrupts.raw -o $OUTPUT")
     COUNTER_GLOBS+=("'interrupts.counter'")
+fi
+if [[ $SAMPLE_DISKSTATS -eq 1 ]]; then
+    TRACERS+=("$HELPERS_DIR/diskstats/diskstats_sampler.sh -o $OUTPUT/diskstats.raw -p 1")
+    POST_PARSE+=("$HELPERS_DIR/diskstats/diskstats_parser.py -i $OUTPUT/diskstats.raw -o $OUTPUT")
+    COUNTER_GLOBS+=("'diskstats_*.counter'")
 fi
 
 FTRACE=0
