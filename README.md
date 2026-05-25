@@ -139,4 +139,30 @@ IRQ device that lines up with every other counter on the timeline.
    $ parser/main.py trace_output --counter 'interrupts.counter'
    ```
 
+### Block device I/O sampling
+
+Per-device throughput (bytes/sec) and IOPS (ops/sec) are derived from
+`/proc/diskstats` in the same two-step shape.
+
+1. **Sample raw snapshots.** The sampler dumps `/proc/diskstats` at every
+   period:
+
+   ```
+   $ sudo scripts/tracer.sh -s -o trace_output \
+       -t "helpers/diskstats/diskstats_sampler.sh -o trace_output/diskstats.raw -p 1" \
+       "sleep 5"
+   ```
+
+2. **Convert raw to general_counter.** The parser computes per-interval
+   deltas and writes one counter file per device. Use `-d` (repeatable) to
+   restrict output to specific devices; omit it to include every device that
+   showed activity during the trace:
+
+   ```
+   $ helpers/diskstats/diskstats_parser.py -i trace_output/diskstats.raw \
+       -o trace_output -d nvme0n1 -d sda
+   $ parser/main.py trace_output --counter 'diskstats_*.counter'
+   ```
+
+   Each output file has columns `read_bps, write_bps, read_iops, write_iops`.
 
