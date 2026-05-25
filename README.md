@@ -9,7 +9,7 @@ For example, run the following command to capture the scheduler ftrace and conve
 to the native Perfetto trace format
 ([synthetic track event](https://perfetto.dev/docs/reference/synthetic-track-event)).
 ```
-$ sudo scripts/tracer.sh -o trace_output -s "sleep 5"
+$ sudo scripts/tracer.sh -o trace_output --ftrace sched "sleep 5"
 $ parser/main.py trace_output --output trace.pftrace
 ```
 
@@ -61,31 +61,64 @@ directory and accepts globs. For example:
 $ parser/main.py trace_output --counter 'ss_*.counter'
 ```
 
+## Ftrace event selection
+
+`tracer.sh` enables ftrace events for the duration of the target command and
+dumps the resulting trace into `ftrace.log`. There are three ways to pick which
+events to record:
+
+| Option             | Picks                                                |
+|--------------------|------------------------------------------------------|
+| `-e <event>`       | one raw event by name (e.g. `sched/sched_switch`), repeatable |
+| `--ftrace <preset>`| a curated group of related events, repeatable        |
+
+`--ftrace` is the convenience form: each preset expands to a small set of
+events that are usually wanted together. Presets are repeatable and may be
+mixed with `-e`:
+
+| Preset      | Events enabled                                                            |
+|-------------|---------------------------------------------------------------------------|
+| `all`       | every event the kernel exposes (large traces)                             |
+| `bio`       | `block/block_rq_insert`, `block/block_rq_complete`                        |
+| `cpuidle`   | `power/cpu_idle`                                                          |
+| `irq`       | `irq/irq_handler_entry`, `irq/irq_handler_exit`, `irq/softirq_entry`, `irq/softirq_exit` |
+| `sched`     | `sched/sched_switch`                                                      |
+
+Both spellings are accepted: `--ftrace sched` and `--ftrace=sched`. Combine
+presets freely — repeat the option, or pass a comma-separated list:
+
+```
+$ sudo scripts/tracer.sh --ftrace sched --ftrace irq -o trace_output "sleep 5"
+$ sudo scripts/tracer.sh --ftrace sched,irq,bio    -o trace_output "sleep 5"
+```
+
 ## Tracer helpers
 
 `tracer.sh -t` accepts a *tracer*: a small daemon that collects some kind of
 useful, time-aligned data alongside the ftrace. Each `-t` is repeatable, runs
 in the background while the target command executes, and is stopped when the
 target exits. The `-t` slot is the general, customisable interface; the bundled
-helpers below also have shorthand long options.
+helpers below also have a shorthand `--tracer <name>` form.
 
 ### Convenience options
 
 For the bundled helpers you do not need to spell out the `-t` command and the
-parse step. The long options below start the matching sampler alongside the
-target and convert its raw file into a counter once the target exits, printing
-the exact `parser/main.py` command to plot the result:
+parse step. The `--tracer <name>` options below start the matching sampler
+alongside the target and convert its raw file into a counter once the target
+exits, printing the exact `parser/main.py` command to plot the result:
 
 ```
-$ sudo scripts/tracer.sh -s --ss --netstat --interrupts --diskstats -o trace_output "sleep 5"
+$ sudo scripts/tracer.sh --ftrace sched --tracer ss --tracer netstat --tracer interrupts --tracer diskstats -o trace_output "sleep 5"
 ```
 
-| Option         | Samples              | Produces                 |
-|----------------|----------------------|--------------------------|
-| `--ss`         | `ss -tin`            | `ss_*.counter`           |
-| `--netstat`    | `/proc/net/netstat`  | `netstat.counter`        |
-| `--interrupts` | `/proc/interrupts`   | `interrupts.counter`     |
-| `--diskstats`  | `/proc/diskstats`    | `diskstats_*.counter`    |
+| Option                | Samples              | Produces                 |
+|-----------------------|----------------------|--------------------------|
+| `--tracer ss`         | `ss -tin`            | `ss_*.counter`           |
+| `--tracer netstat`    | `/proc/net/netstat`  | `netstat.counter`        |
+| `--tracer interrupts` | `/proc/interrupts`   | `interrupts.counter`     |
+| `--tracer diskstats`  | `/proc/diskstats`    | `diskstats_*.counter`    |
+
+`--tracer` accepts the same comma-separated form (e.g. `--tracer ss,netstat`).
 
 The verbose `-t` form documented below stays available for custom helpers or
 non-default sampling periods.
@@ -99,7 +132,7 @@ Network state is collected in two steps to keep the sampling loop cheap.
    background alongside the target command and are stopped when it exits:
 
    ```
-   $ sudo scripts/tracer.sh -s -o trace_output \
+   $ sudo scripts/tracer.sh --ftrace sched -o trace_output \
        -t "helpers/ss/ss_sampler.sh -o ss.raw -p 1" \
        -t "helpers/netstat/netstat_sampler.sh -o netstat.raw -p 1" \
        "sleep 5"
@@ -121,14 +154,14 @@ snapshots `/proc/interrupts`; the parser sums each IRQ's per-CPU counts into a
 single `interrupts.counter`. The counts are cumulative since boot, so on the
 Perfetto timeline the slope of each track is the interrupt rate.
 
-This is complementary to the ftrace `irq` events (`tracer.sh -i`): ftrace gives
+This is complementary to the ftrace `irq` events (`tracer.sh --ftrace irq`): ftrace gives
 per-interrupt entry/exit slices, while this gives a cheap, always-on count per
 IRQ device that lines up with every other counter on the timeline.
 
 1. **Sample raw snapshots.**
 
    ```
-   $ sudo scripts/tracer.sh -s -o trace_output \
+   $ sudo scripts/tracer.sh --ftrace sched -o trace_output \
        -t "helpers/interrupts/interrupts_sampler.sh -o interrupts.raw -p 1" \
        "sleep 5"
    ```
@@ -149,7 +182,7 @@ Per-device throughput (bytes/sec) and IOPS (ops/sec) are derived from
    period:
 
    ```
-   $ sudo scripts/tracer.sh -s -o trace_output \
+   $ sudo scripts/tracer.sh --ftrace sched -o trace_output \
        -t "helpers/diskstats/diskstats_sampler.sh -o trace_output/diskstats.raw -p 1" \
        "sleep 5"
    ```

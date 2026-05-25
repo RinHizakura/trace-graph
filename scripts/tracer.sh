@@ -62,26 +62,28 @@ function ftrace_sampler()
 
 function print_help()
 {
-    usage="$(basename "$0") [-h] [-o output] [-e event] [-a] [-b] [-c] [-i] [-s] [-p] [-t cmd] [--ss] [--netstat] [--interrupts] [--diskstats] \n
+    usage="$(basename "$0") [-h] [-o output] [-e event] [-p] [-t cmd] [--ftrace preset] [--tracer name] \n
 where:                                                 \n
     -h  show this help text                            \n
     -o  specify the output directory (default /tmp/trace_log) \n
     -e  select the event for ftrace                    \n
-    -a  select all events for ftrace                   \n
-    -b  select the bio event for ftrace                \n
-    -c  selec the cpuidle event for ftrace             \n
-    -i  select the irq event for ftrace                \n
-    -s  select the sched event for ftrace              \n
     -p  trace only the run command and its childs' PID \n
     -t  run this tracer helper alongside the target command (repeatable) \n
 \n
-convenience tracers (run a bundled helper and convert it to a counter at the end): \n
-    --ss          sample TCP socket stats (ss -tin)    \n
-    --netstat     sample /proc/net/netstat             \n
-    --interrupts  sample /proc/interrupts              \n
-    --diskstats   sample /proc/diskstats               \n
+convenience ftrace presets (named ftrace event groups, repeatable): \n
+    --ftrace all       enable every ftrace event                   \n
+    --ftrace bio       block_rq_insert / block_rq_complete         \n
+    --ftrace cpuidle   power/cpu_idle                              \n
+    --ftrace irq       irq + softirq entry/exit                    \n
+    --ftrace sched     sched/sched_switch                          \n
 \n
-Use -t for any custom helper; the long options above are shorthand for the bundled ones."
+convenience bundled tracers (run a helper and convert it to a counter, repeatable): \n
+    --tracer ss          sample TCP socket stats (ss -tin) \n
+    --tracer netstat     sample /proc/net/netstat          \n
+    --tracer interrupts  sample /proc/interrupts           \n
+    --tracer diskstats   sample /proc/diskstats            \n
+\n
+Use -e for any raw ftrace event and -t for any custom helper; the long options above are shorthand for the bundled ones."
 
     echo -e $usage
 }
@@ -99,33 +101,62 @@ SAMPLE_SS=0
 SAMPLE_NETSTAT=0
 SAMPLE_IRQ=0
 SAMPLE_DISKSTATS=0
-while getopts ":o:e:t:bcispah-:" opt
+add_ftrace_preset()
+{
+    local IFS=','
+    local item
+    for item in $1; do
+        [ -z "$item" ] && continue
+        case "$item" in
+            all) ALL_EVENTS=1;;
+            bio) EVENT_LIST+=("block/block_rq_insert" "block/block_rq_complete");;
+            cpuidle) EVENT_LIST+=("power/cpu_idle");;
+            irq) EVENT_LIST+=("irq/irq_handler_entry" "irq/irq_handler_exit" \
+                              "irq/softirq_entry" "irq/softirq_exit");;
+            sched) EVENT_LIST+=("sched/sched_switch");;
+            *) echo "Unknown --ftrace preset: $item" >&2; print_help; exit 1;;
+        esac
+    done
+}
+
+add_bundled_tracer()
+{
+    local IFS=','
+    local item
+    for item in $1; do
+        [ -z "$item" ] && continue
+        case "$item" in
+            ss) SAMPLE_SS=1;;
+            netstat) SAMPLE_NETSTAT=1;;
+            interrupts) SAMPLE_IRQ=1;;
+            diskstats) SAMPLE_DISKSTATS=1;;
+            *) echo "Unknown --tracer name: $item" >&2; print_help; exit 1;;
+        esac
+    done
+}
+
+while getopts ":o:e:t:ph-:" opt
 do
     case $opt in
         -)
             case "$OPTARG" in
-                ss) SAMPLE_SS=1;;
-                netstat) SAMPLE_NETSTAT=1;;
-                interrupts) SAMPLE_IRQ=1;;
-                diskstats) SAMPLE_DISKSTATS=1;;
+                ftrace)
+                    val="${!OPTIND}"; OPTIND=$((OPTIND + 1))
+                    add_ftrace_preset "$val";;
+                ftrace=*)
+                    add_ftrace_preset "${OPTARG#*=}";;
+                tracer)
+                    val="${!OPTIND}"; OPTIND=$((OPTIND + 1))
+                    add_bundled_tracer "$val";;
+                tracer=*)
+                    add_bundled_tracer "${OPTARG#*=}";;
                 help) print_help; exit 0;;
                 *) echo "Unknown option --$OPTARG" >&2; print_help; exit 1;;
             esac;;
         o)
             OUTPUT="$OPTARG";;
-        a)
-            ALL_EVENTS=1;;
         e)
             EVENT_LIST+=("$OPTARG");;
-        b)
-            EVENT_LIST+=("block/block_rq_insert" "block/block_rq_complete");;
-        c)
-            EVENT_LIST+=("power/cpu_idle");;
-        i)
-            EVENT_LIST+=("irq/irq_handler_entry" "irq/irq_handler_exit");
-            EVENT_LIST+=("irq/softirq_entry" "irq/softirq_exit");;
-        s)
-            EVENT_LIST+=("sched/sched_switch");;
         p)
             PID=1;;
         t)
