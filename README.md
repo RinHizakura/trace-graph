@@ -40,7 +40,8 @@ Trace-graph exists for two cases where owning the parser pays off:
    device) instead of by the CPU they fired on, depending on what you are
    investigating. Pick whichever grouping fits the question at hand.
 
-## general_counter format
+## Features
+### general_counter format
 
 Any file whose rows look like
 
@@ -60,6 +61,20 @@ directory and accepts globs. For example:
 ```
 $ parser/main.py trace_output --counter 'ss_*.counter'
 ```
+
+### Pre-command warmup trim
+
+`tracer.sh` brings every tracer up *before* releasing the target command and
+records a `START_TS` (matching `/proc/uptime`, captured against the boot
+clock that ftrace is also pinned to) at the exact moment the command is
+allowed to run. The value is written to `<output>/start_ts`. The raw
+artifacts on disk — `ftrace.log` and the `.counter` files — keep the full
+sample series including the warmup window.
+
+`parser/main.py` reads `<output>/start_ts` and drops the pre-command rows
+when it builds the Perfetto trace, so every track lines up at the moment
+the command really started. The file is mandatory — `parser/main.py`
+refuses to run without it.
 
 ## Ftrace event selection
 
@@ -109,17 +124,6 @@ $ sudo scripts/tracer.sh --ftrace sched --tracer ss,netstat,interrupts,diskstats
 `--tracer` accepts the same comma-separated form as `--ftrace` (e.g.
 `--tracer ss,netstat`). The verbose `-t` form documented below stays available
 for custom helpers or non-default sampling periods.
-
-`tracer.sh` brings every tracer up *before* releasing the target command
-and records a `START_TS` (matching `/proc/uptime`, captured against the
-boot clock that ftrace is also pinned to) at the exact moment the command
-is allowed to run. The value is written to `<output>/start_ts`. The raw
-artifacts on disk — `ftrace.log` and the `.counter` files — keep the full
-sample series including the warmup window; `parser/main.py` reads
-`<output>/start_ts` and drops the pre-command rows when it builds the
-Perfetto trace, so every track lines up at the moment the command really
-started. The file is mandatory — `parser/main.py` refuses to run without
-it. To opt out of the trim, replace it with `echo 0 > <output>/start_ts`.
 
 ### Network sampling
 
