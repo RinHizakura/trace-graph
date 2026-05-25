@@ -110,6 +110,17 @@ $ sudo scripts/tracer.sh --ftrace sched --tracer ss,netstat,interrupts,diskstats
 `--tracer ss,netstat`). The verbose `-t` form documented below stays available
 for custom helpers or non-default sampling periods.
 
+`tracer.sh` brings every tracer up *before* releasing the target command
+and records a `START_TS` (matching `/proc/uptime`, captured against the
+boot clock that ftrace is also pinned to) at the exact moment the command
+is allowed to run. The value is written to `<output>/start_ts`. The raw
+artifacts on disk — `ftrace.log` and the `.counter` files — keep the full
+sample series including the warmup window; `parser/main.py` reads
+`<output>/start_ts` and drops the pre-command rows when it builds the
+Perfetto trace, so every track lines up at the moment the command really
+started. The file is mandatory — `parser/main.py` refuses to run without
+it. To opt out of the trim, replace it with `echo 0 > <output>/start_ts`.
+
 ### Network sampling
 
 Network state is collected in two steps to keep the sampling loop cheap.
@@ -203,8 +214,22 @@ $ sudo scripts/tracer.sh --ftrace sched -o trace_output \
 $ parser/main.py trace_output --counter 'probe.counter'
 ```
 
-Under the hood this writes `p:<group>/<sanitized_name> <FUNC>` to
-`/sys/kernel/tracing/kprobe_events`, samples `kprobe_profile` once per second,
-and removes the probes on exit. Symbols that the kernel does not expose to
-kprobes (inlined, `notrace`, missing) cause the helper to abort with an error
-before the target command runs.
+The same flow can be driven manually if you want to compose your own
+pipeline — hand the sampler to `tracer.sh -t` and run the parser by hand.
+The warmup trim still happens in `parser/main.py` via `<output>/start_ts`:
+
+```
+$ sudo scripts/tracer.sh --ftrace sched -o trace_output \
+    -t "helpers/probe/probe_sampler.sh -o trace_output/probe.raw -p 1 \
+        -f arm_smmu_atc_inv_domain -f __arm_smmu_tlb_inv_range" \
+    "sleep 5"
+$ helpers/probe/probe_parser.py -i trace_output/probe.raw -o trace_output
+$ parser/main.py trace_output --counter 'probe.counter'
+```
+
+Under the hood this writes `p:<sanitized_name> <FUNC>` to
+`/sys/kernel/tracing/kprobe_events` (lands in the default `kprobes/` group),
+samples `kprobe_profile` once per second, and removes the probes on exit.
+Symbols that the kernel does not expose to kprobes (inlined, `notrace`,
+missing) cause the helper to abort with an error before the target command
+runs.

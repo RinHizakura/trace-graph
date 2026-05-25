@@ -49,17 +49,23 @@ def _iter_rows(file):
         yield header, ts_ns, values
 
 
-def parse_general_counter_log(trace, file, group_name):
+def parse_general_counter_log(trace, file, group_name, start_ts=None):
     """Parse a general_counter file and emit one counter track per column.
 
     Format per line: ``[<seconds>] v1,v2,v3,...``. An optional leading
     ``# col1,col2,...`` line names the columns; otherwise tracks are named
     ``v1, v2, v3, ...``. All tracks for one file are grouped under
     ``counter/<group_name>``.
+
+    ``start_ts`` (seconds) drops rows whose timestamp is earlier; values are
+    compared in seconds before being scaled to nanoseconds.
     """
     parent_key = f"counter/{group_name}"
     column_names = None
+    start_ts_ns = int(start_ts * 10**9) if start_ts is not None else None
     for header, ts_ns, values in _iter_rows(file):
+        if start_ts_ns is not None and ts_ns < start_ts_ns:
+            continue
         if column_names is None:
             if header:
                 column_names = header
@@ -78,11 +84,11 @@ def parse_general_counter_log(trace, file, group_name):
             trace.add_counter_event(uuid, ts_ns, value)
 
 
-def parse_general_counter_file(trace, path):
+def parse_general_counter_file(trace, path, start_ts=None):
     """Open `path` and parse it as a general_counter file.
 
     The group name is derived from the file's basename without its extension.
     """
     group_name = os.path.splitext(os.path.basename(path))[0]
     with open(path, "r") as f:
-        parse_general_counter_log(trace, f, group_name)
+        parse_general_counter_log(trace, f, group_name, start_ts=start_ts)

@@ -22,6 +22,11 @@ function ftrace_sampler()
             echo 0 > $SYSFS_TRACE/events/enable
             echo 0 > $SYSFS_TRACE/tracing_on
 
+            # Use the boot clock so ftrace timestamps line up with /proc/uptime
+            # (the clock the samplers and START_TS use); the trace_clock write
+            # must happen while the buffer is empty.
+            echo boot > $SYSFS_TRACE/trace_clock
+
             if [[ $ALL_EVENTS -eq 1 ]]; then
                 echo Enable all events
                 enable_event ""
@@ -56,8 +61,21 @@ function ftrace_sampler()
             echo > $SYSFS_TRACE/set_event_pid
             echo nop > $SYSFS_TRACE/current_tracer
             echo 0 > $SYSFS_TRACE/events/enable
+            echo local > $SYSFS_TRACE/trace_clock
             ;;
     esac
+}
+
+# Run all the post-cmd reductions: convert each bundled sampler's raw file
+# into a general_counter file. Pre-command warmup samples are not trimmed
+# here — parser/main.py reads $OUTPUT/start_ts and filters at plot time so
+# the raw artifacts on disk stay complete.
+function post_parse()
+{
+    for parse in "${POST_PARSE[@]}"; do
+        echo "Parsing: $parse"
+        eval "$parse"
+    done
 }
 
 function print_help()
@@ -243,10 +261,23 @@ if [[ $FTRACE -eq 1 ]]; then
     ftrace_sampler setup
 fi
 
-# Enable trace and start running the command
-(sleep 5; eval $CMD) &
+# Start tracers BEFORE the target command so the kernel-side setup (kprobe
+# registration, file opens, ...) is complete and we know they're healthy
+# before any cmd output is sampled. The command is launched in a subshell
+# that SIGSTOPs itself just before exec'ing $CMD so we get the cmd's real
+# PID into $CPID (exec keeps the PID) and have a precise moment to write
+# the ftrace pid filter and capture START_TS. SIGCONT releases it.
+(exec bash -c 'kill -STOP $$; exec "$@"' _ $CMD) &
 CPID=$!
-echo "Run command '$CMD'(ppid=$$ pid=$CPID) and enable tracing..."
+
+# Wait until the child is actually stopped so set_event_pid is written
+# against a task the kernel knows; /proc/<pid>/stat field 3 = 'T' when
+# stopped.
+while :; do
+    state=$(awk '{print $3}' "/proc/$CPID/stat" 2>/dev/null) || break
+    [ "$state" = "T" ] && break
+done
+echo "Prepared command '$CMD' (pid=$CPID), waiting for tracer setup..."
 
 if [[ $FTRACE -eq 1 ]]; then
     ftrace_sampler start $CPID
@@ -254,10 +285,46 @@ fi
 
 TRACER_PIDS=()
 for tracer in "${TRACERS[@]}"; do
-    eval "$tracer" &
+    # Background inside eval so the cmd runs as a direct child of this shell.
+    # `eval "$tracer" &` would fork a subshell first; $! would then be the
+    # subshell PID and the actual tracer survives cleanup as an orphan.
+    eval "$tracer &"
     TRACER_PIDS+=($!)
     echo "Started tracer '$tracer' pid=${TRACER_PIDS[-1]}"
 done
+
+# Give tracers a moment to finish their setup phase, then verify each one is
+# still alive. A tracer that died during setup (e.g. kprobe registration
+# failed) would otherwise leave the command running with no data and break
+# post-parsing on the missing raw file.
+if [[ ${#TRACER_PIDS[@]} -gt 0 ]]; then
+    sleep 0.5
+    for i in "${!TRACER_PIDS[@]}"; do
+        pid=${TRACER_PIDS[$i]}
+        if ! kill -0 "$pid" 2>/dev/null; then
+            echo "Error: tracer '${TRACERS[$i]}' exited during startup" >&2
+            for p in "${TRACER_PIDS[@]}"; do
+                kill "$p" 2>/dev/null || true
+            done
+            # $CPID is SIGSTOP'd until release; SIGTERM would be queued, so use SIGKILL.
+            kill -KILL "$CPID" 2>/dev/null || true
+            if [[ $FTRACE -eq 1 ]]; then
+                ftrace_sampler stop
+            fi
+            exit 1
+        fi
+    done
+fi
+
+# Capture the start timestamp (matches /proc/uptime which the samplers use)
+# and release the command. Parsers will drop any sample whose @TS is earlier
+# than this so the warmup window doesn't show up on the timeline; the
+# timestamp is also persisted to $OUTPUT/start_ts so downstream tools can
+# read it back without re-deriving from the parser CLI.
+START_TS=$(awk '{print $1}' /proc/uptime)
+echo "$START_TS" > "$OUTPUT/start_ts"
+kill -CONT "$CPID"
+echo "Command released at @TS=$START_TS"
 
 # Stop error exit temporary to make sure we can get the return code of the command
 set +e
@@ -276,16 +343,14 @@ if [[ ${#TRACER_PIDS[@]} -gt 0 ]]; then
     echo "Tracers stopped."
 fi
 
-# Convert the bundled samplers' raw files into general_counter files.
-for parse in "${POST_PARSE[@]}"; do
-    echo "Parsing: $parse"
-    eval "$parse"
-done
-
+# Dump the ftrace buffer to $FTRACE_OUTPUT before post-parsing so post_parse
+# can prune its warmup tail alongside the bundled counter conversions.
 if [[ $FTRACE -eq 1 ]]; then
     ftrace_sampler stop
     echo "ftrace sampler stopped. Output: $FTRACE_OUTPUT"
 fi
+
+post_parse
 
 echo "Done. Please find $OUTPUT for the trace log."
 

@@ -5,23 +5,11 @@ general_counter file named ``netstat.counter`` inside the output directory.
 
 import argparse
 import os
+import sys
+from pathlib import Path
 
-
-def _iter_ts_samples(file):
-    """Yield (ts, lines) for each '@TS <seconds>'-delimited block."""
-    ts = None
-    lines = []
-    for raw in file:
-        line = raw.rstrip("\n")
-        if line.startswith("@TS "):
-            if ts is not None:
-                yield ts, lines
-            ts = line[4:].strip()
-            lines = []
-        else:
-            lines.append(line)
-    if ts is not None:
-        yield ts, lines
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from counter_file import CounterFile, iter_ts_samples
 
 
 def _parse_netstat_block(lines):
@@ -47,38 +35,6 @@ def _parse_netstat_block(lines):
     return pairs
 
 
-class CounterFile:
-    """Buffer header + rows in memory; flush as a complete file at the end."""
-
-    def __init__(self, path):
-        self.path = path
-        self.columns = []
-        self.col_index = {}
-        self.rows = []
-
-    def write(self, ts, pairs):
-        if not self.columns:
-            for name, _ in pairs:
-                if name in self.col_index:
-                    continue
-                self.col_index[name] = len(self.columns)
-                self.columns.append(name)
-        row = [""] * len(self.columns)
-        for name, value in pairs:
-            idx = self.col_index.get(name)
-            if idx is not None:
-                row[idx] = str(value)
-        self.rows.append((ts, row))
-
-    def flush(self):
-        if not self.columns:
-            return
-        with open(self.path, "w") as f:
-            f.write("# " + ",".join(self.columns) + "\n")
-            for ts, row in self.rows:
-                f.write(f"[{ts}] " + ",".join(row) + "\n")
-
-
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("-i", "--input", required=True, help="raw netstat samples produced by netstat_sampler.sh")
@@ -88,7 +44,7 @@ def main():
     os.makedirs(args.output_dir, exist_ok=True)
     cf = CounterFile(os.path.join(args.output_dir, "netstat.counter"))
     with open(args.input) as f:
-        for ts, lines in _iter_ts_samples(f):
+        for ts, lines in iter_ts_samples(f):
             pairs = _parse_netstat_block(lines)
             if pairs:
                 cf.write(ts, pairs)

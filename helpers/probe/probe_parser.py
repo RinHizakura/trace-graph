@@ -11,10 +11,15 @@ of the probed function.
 
 import argparse
 import os
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from counter_file import CounterFile
 
 
-def _iter_samples(file):
-    """Read the whole raw file and return (funcs, name2func, samples).
+def _read(file):
+    """Return (funcs, name2func, samples) from a probe raw file.
 
     The @PROBES header lists ``func=kprobe_event_name`` pairs so we can map
     the kprobe_profile rows back to the user-facing function name.
@@ -64,39 +69,6 @@ def _parse_kprobe_profile(lines, name2func):
     return out
 
 
-class CounterFile:
-    """Buffer header + rows in memory; flush as a complete file at the end."""
-
-    def __init__(self, path):
-        self.path = path
-        self.columns = []
-        self.col_index = {}
-        self.rows = []
-
-    def set_columns(self, names):
-        for name in names:
-            if name in self.col_index:
-                continue
-            self.col_index[name] = len(self.columns)
-            self.columns.append(name)
-
-    def write(self, ts, pairs):
-        row = [""] * len(self.columns)
-        for name, value in pairs:
-            idx = self.col_index.get(name)
-            if idx is not None:
-                row[idx] = str(value)
-        self.rows.append((ts, row))
-
-    def flush(self):
-        if not self.columns or not self.rows:
-            return
-        with open(self.path, "w") as f:
-            f.write("# " + ",".join(self.columns) + "\n")
-            for ts, row in self.rows:
-                f.write(f"[{ts}] " + ",".join(row) + "\n")
-
-
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("-i", "--input", required=True,
@@ -107,10 +79,10 @@ def main():
 
     os.makedirs(args.output_dir, exist_ok=True)
     with open(args.input) as f:
-        funcs, name2func, samples = _iter_samples(f)
+        funcs, name2func, samples = _read(f)
 
     cf = CounterFile(os.path.join(args.output_dir, "probe.counter"))
-    cf.set_columns(funcs)
+    cf.declare_columns(funcs)
     for ts, lines in samples:
         pairs = _parse_kprobe_profile(lines, name2func)
         if pairs:

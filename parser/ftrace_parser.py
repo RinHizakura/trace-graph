@@ -139,8 +139,11 @@ def handle_softirq_end_event(info, cpu, duration, timestamp):
     return exit_info
 
 
-def parse_ftrace(trace, file):
+def parse_ftrace(trace, file, start_ts=None):
     # ftrace line: name-pid (tgid) [cpu] stat time: event: info
+    # ``start_ts`` (seconds, boot clock — matches /proc/uptime and tracer.sh's
+    # $OUTPUT/start_ts) drops events from the pre-command warmup window so the
+    # ftrace timeline starts at the same moment as the counter tracks.
     name = r"[\w<>\-.:/() ]"
     regex = rf"({name}+)-(\d+)\s+(\([\d -]+\))\s+\[(\d+)\]\s+([\w.]+)\s+(\d+\.\d+):\s+(\w+):\s(.+)"
 
@@ -181,6 +184,9 @@ def parse_ftrace(trace, file):
             items[6],
             items[7],
         )
+
+        if start_ts is not None and time < start_ts:
+            continue
 
         events.add(event)
         pid_map[process_id] = name

@@ -50,26 +50,23 @@ fi
 TRACEFS=/sys/kernel/tracing
 [ -d "$TRACEFS/events" ] || TRACEFS=/sys/kernel/debug/tracing
 
-# Sanitize a symbol into a kprobe event name (kprobe events disallow some chars).
+# Sanitize a symbol into a kprobe event name (kprobe events
+# disallow some chars).
 # Use printf to avoid the trailing newline echo would inject.
 sanitize() { printf '%s' "$1" | tr -c '[:alnum:]_' '_'; }
 
-# kprobe_profile reports event names without their group, so we make each
-# event name PID-unique to keep concurrent / leaked-from-previous-run probes
-# from colliding in the output.
-GROUP="tg_probe_$$"
 NAMES=()
 HEADER="@PROBES"
 for func in "${FUNCS[@]}"; do
     name="$(sanitize "$func")_p$$"
     NAMES+=("$name")
     HEADER="$HEADER ${func}=${name}"
-    if ! printf 'p:%s/%s %s\n' "$GROUP" "$name" "$func" \
+    if ! printf 'p:%s %s\n' "$name" "$func" \
             >> "$TRACEFS/kprobe_events" 2>/dev/null; then
         echo "Error: failed to add kprobe for $func" >&2
         exit 1
     fi
-    echo 1 > "$TRACEFS/events/${GROUP}/${name}/enable"
+    echo 1 > "$TRACEFS/events/kprobes/${name}/enable"
 done
 
 mkdir -p "$(dirname "$OUT")"
@@ -79,8 +76,8 @@ echo "$HEADER" > "$OUT"
 cleanup()
 {
     for name in "${NAMES[@]}"; do
-        echo 0 > "$TRACEFS/events/${GROUP}/${name}/enable" 2>/dev/null || true
-        printf -- '-:%s/%s\n' "$GROUP" "$name" \
+        echo 0 > "$TRACEFS/events/kprobes/${name}/enable" 2>/dev/null || true
+        printf -- '-:%s\n' "$name" \
             >> "$TRACEFS/kprobe_events" 2>/dev/null || true
     done
 }

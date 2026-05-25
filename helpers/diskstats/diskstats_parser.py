@@ -12,6 +12,11 @@ consecutive samples:
 import argparse
 import os
 import re
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from counter_file import CounterFile, iter_ts_samples
 
 
 # Linux always reports diskstats sectors as 512 bytes, regardless of the
@@ -19,23 +24,6 @@ import re
 _SECTOR_BYTES = 512
 
 _FNAME_SAFE_RE = re.compile(r"[^A-Za-z0-9_.\-]+")
-
-
-def _iter_ts_samples(file):
-    """Yield (ts, lines) for each '@TS <seconds>'-delimited block."""
-    ts = None
-    lines = []
-    for raw in file:
-        line = raw.rstrip("\n")
-        if line.startswith("@TS "):
-            if ts is not None:
-                yield ts, lines
-            ts = line[4:].strip()
-            lines = []
-        else:
-            lines.append(line)
-    if ts is not None:
-        yield ts, lines
 
 
 def _parse_diskstats_block(lines):
@@ -59,27 +47,6 @@ def _parse_diskstats_block(lines):
         devs[name] = (reads_completed, sectors_read,
                       writes_completed, sectors_written)
     return devs
-
-
-class CounterFile:
-    """Buffer header + rows in memory; flush as a complete file at the end."""
-
-    def __init__(self, path, columns):
-        self.path = path
-        self.columns = columns
-        self.rows = []
-
-    def write(self, ts, values):
-        row = [str(v) for v in values]
-        self.rows.append((ts, row))
-
-    def flush(self):
-        if not self.rows:
-            return
-        with open(self.path, "w") as f:
-            f.write("# " + ",".join(self.columns) + "\n")
-            for ts, row in self.rows:
-                f.write(f"[{ts}] " + ",".join(row) + "\n")
 
 
 def _sanitize(name):
@@ -112,7 +79,7 @@ def main():
     prev_stats = {}
 
     with open(args.input) as f:
-        for ts_str, lines in _iter_ts_samples(f):
+        for ts_str, lines in iter_ts_samples(f):
             try:
                 ts = float(ts_str)
             except ValueError:
@@ -143,7 +110,7 @@ def main():
                     if cf is None:
                         fname = f"diskstats_{_sanitize(dev)}.counter"
                         cf = CounterFile(os.path.join(args.output_dir, fname),
-                                         columns)
+                                         columns=columns)
                         files[dev] = cf
                     cf.write(ts_str, [
                         f"{_format_rate(d_read_sectors * _SECTOR_BYTES, dt):.2f}",

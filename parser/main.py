@@ -10,6 +10,7 @@ from trace_writer import PerfettoTraceFile
 
 
 FTRACE_FILE = "ftrace.log"
+START_TS_FILE = "start_ts"
 
 
 def get_args():
@@ -28,6 +29,24 @@ def get_args():
     )
     args = parser.parse_args()
     return args
+
+
+def _read_start_ts(input_dir):
+    """Return the warmup cutoff in seconds.
+
+    ``<input>/start_ts`` is written by tracer.sh at the exact moment the
+    target command is released; we refuse to parse without it so the
+    Perfetto timeline can never accidentally include pre-command warmup
+    samples.
+    """
+    path = os.path.join(input_dir, START_TS_FILE)
+    if not os.path.exists(path):
+        exit(f"Error: {path} not found — was this directory produced by tracer.sh?")
+    with open(path) as f:
+        text = f.read().strip()
+    if not text:
+        exit(f"Error: {path} is empty")
+    return float(text)
 
 
 if __name__ == "__main__":
@@ -52,13 +71,15 @@ if __name__ == "__main__":
     if not os.path.exists(ftrace_f) and not counter_fs:
         exit(f"Error: no known log files found under {input_dir}")
 
+    start_ts = _read_start_ts(input_dir)
+
     trace = PerfettoTraceFile(output_f)
 
     if os.path.exists(ftrace_f):
         with open(ftrace_f, "r") as f:
-            parse_ftrace(trace, f)
+            parse_ftrace(trace, f, start_ts=start_ts)
 
     for p in counter_fs:
-        parse_general_counter_file(trace, p)
+        parse_general_counter_file(trace, p, start_ts=start_ts)
 
     trace.close()

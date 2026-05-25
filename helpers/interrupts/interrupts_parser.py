@@ -11,26 +11,14 @@ slope of the cumulative count is the interrupt rate.
 import argparse
 import os
 import re
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from counter_file import CounterFile, iter_ts_samples
 
 
 _FNAME_SAFE_RE = re.compile(r"[^A-Za-z0-9_.:%\-]+")
-
-
-def _iter_ts_samples(file):
-    """Yield (ts, lines) for each '@TS <seconds>'-delimited block."""
-    ts = None
-    lines = []
-    for raw in file:
-        line = raw.rstrip("\n")
-        if line.startswith("@TS "):
-            if ts is not None:
-                yield ts, lines
-            ts = line[4:].strip()
-            lines = []
-        else:
-            lines.append(line)
-    if ts is not None:
-        yield ts, lines
 
 
 def _sanitize(name):
@@ -74,65 +62,6 @@ def _parse_interrupts_block(lines):
     return pairs
 
 
-class CounterFile:
-    """Buffer header + rows in memory; flush as a complete file at the end."""
-
-    def __init__(self, path):
-        self.path = path
-        self.columns = []
-        self.col_index = {}
-        self.rows = []
-
-    def write(self, ts, pairs):
-        if not self.columns:
-            for name, _ in pairs:
-                if name in self.col_index:
-                    continue
-                self.col_index[name] = len(self.columns)
-                self.columns.append(name)
-        row = [""] * len(self.columns)
-        for name, value in pairs:
-            idx = self.col_index.get(name)
-            if idx is not None:
-                row[idx] = str(value)
-        self.rows.append((ts, row))
-
-    def _active_columns(self):
-        """Indices of columns whose count rises above its first sample.
-
-        The first snapshot is the reference; an IRQ that never increments over
-        the run carries no information, so its track is dropped.
-        """
-        keep = []
-        for i in range(len(self.columns)):
-            first = None
-            active = False
-            for _, row in self.rows:
-                cell = row[i]
-                if not cell:
-                    continue
-                val = int(cell)
-                if first is None:
-                    first = val
-                elif val > first:
-                    active = True
-                    break
-            if active:
-                keep.append(i)
-        return keep
-
-    def flush(self):
-        if not self.columns:
-            return
-        keep = self._active_columns()
-        if not keep:
-            return
-        with open(self.path, "w") as f:
-            f.write("# " + ",".join(self.columns[i] for i in keep) + "\n")
-            for ts, row in self.rows:
-                f.write(f"[{ts}] " + ",".join(row[i] for i in keep) + "\n")
-
-
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("-i", "--input", required=True, help="raw interrupts samples produced by interrupts_sampler.sh")
@@ -142,11 +71,12 @@ def main():
     os.makedirs(args.output_dir, exist_ok=True)
     cf = CounterFile(os.path.join(args.output_dir, "interrupts.counter"))
     with open(args.input) as f:
-        for ts, lines in _iter_ts_samples(f):
+        for ts, lines in iter_ts_samples(f):
             pairs = _parse_interrupts_block(lines)
             if pairs:
                 cf.write(ts, pairs)
-    cf.flush()
+    # Drop IRQ lines that never fired during the trace window.
+    cf.flush(drop_inactive=True)
 
 
 if __name__ == "__main__":
