@@ -62,7 +62,7 @@ function ftrace_sampler()
 
 function print_help()
 {
-    usage="$(basename "$0") [-h] [-o output] [-e event] [-p] [-t cmd] [--ftrace preset] [--tracer name] \n
+    usage="$(basename "$0") [-h] [-o output] [-e event] [-p] [-t cmd] [--ftrace preset] [--tracer name] [--probe func] \n
 where:                                                 \n
     -h  show this help text                            \n
     -o  specify the output directory (default /tmp/trace_log) \n
@@ -83,6 +83,9 @@ convenience bundled tracers (run a helper and convert it to a counter, repeatabl
     --tracer interrupts  sample /proc/interrupts           \n
     --tracer diskstats   sample /proc/diskstats            \n
 \n
+kprobe call counters (one column per function in probe.counter, repeatable): \n
+    --probe FUNC         add a kprobe on kernel symbol FUNC and emit its hit count \n
+\n
 Use -e for any raw ftrace event and -t for any custom helper; the long options above are shorthand for the bundled ones."
 
     echo -e $usage
@@ -101,6 +104,7 @@ SAMPLE_SS=0
 SAMPLE_NETSTAT=0
 SAMPLE_IRQ=0
 SAMPLE_DISKSTATS=0
+PROBE_LIST=()
 add_ftrace_preset()
 {
     local IFS=','
@@ -135,6 +139,16 @@ add_bundled_tracer()
     done
 }
 
+add_probe()
+{
+    local IFS=','
+    local item
+    for item in $1; do
+        [ -z "$item" ] && continue
+        PROBE_LIST+=("$item")
+    done
+}
+
 while getopts ":o:e:t:ph-:" opt
 do
     case $opt in
@@ -146,6 +160,9 @@ do
                 tracer)
                     val="${!OPTIND}"; OPTIND=$((OPTIND + 1))
                     add_bundled_tracer "$val";;
+                probe)
+                    val="${!OPTIND}"; OPTIND=$((OPTIND + 1))
+                    add_probe "$val";;
                 help) print_help; exit 0;;
                 *) echo "Unknown option --$OPTARG" >&2; print_help; exit 1;;
             esac;;
@@ -204,6 +221,15 @@ if [[ $SAMPLE_DISKSTATS -eq 1 ]]; then
     TRACERS+=("$HELPERS_DIR/diskstats/diskstats_sampler.sh -o $OUTPUT/diskstats.raw -p 1")
     POST_PARSE+=("$HELPERS_DIR/diskstats/diskstats_parser.py -i $OUTPUT/diskstats.raw -o $OUTPUT")
     COUNTER_GLOBS+=("'diskstats_*.counter'")
+fi
+if [[ ${#PROBE_LIST[@]} -gt 0 ]]; then
+    probe_args=""
+    for f in "${PROBE_LIST[@]}"; do
+        probe_args+=" -f $f"
+    done
+    TRACERS+=("$HELPERS_DIR/probe/probe_sampler.sh -o $OUTPUT/probe.raw -p 1$probe_args")
+    POST_PARSE+=("$HELPERS_DIR/probe/probe_parser.py -i $OUTPUT/probe.raw -o $OUTPUT")
+    COUNTER_GLOBS+=("'probe.counter'")
 fi
 
 FTRACE=0

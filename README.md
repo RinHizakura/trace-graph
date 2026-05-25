@@ -187,3 +187,24 @@ Per-device throughput (bytes/sec) and IOPS (ops/sec) are derived from
 
    Each output file has columns `read_bps, write_bps, read_iops, write_iops`.
 
+## Kprobe call-count counters
+
+`--probe FUNC` installs a kprobe on the given kernel symbol for the duration
+of the target command and reports its cumulative hit count as one column in
+`probe.counter`. The slope of each track on the Perfetto timeline is the call
+rate of that function — useful for things that have no dedicated tracepoint.
+Repeat the option or pass a comma-separated list to probe several symbols at
+once:
+
+```
+$ sudo scripts/tracer.sh --ftrace sched -o trace_output \
+    --probe arm_smmu_atc_inv_domain,__arm_smmu_tlb_inv_range \
+    "sleep 5"
+$ parser/main.py trace_output --counter 'probe.counter'
+```
+
+Under the hood this writes `p:<group>/<sanitized_name> <FUNC>` to
+`/sys/kernel/tracing/kprobe_events`, samples `kprobe_profile` once per second,
+and removes the probes on exit. Symbols that the kernel does not expose to
+kprobes (inlined, `notrace`, missing) cause the helper to abort with an error
+before the target command runs.
