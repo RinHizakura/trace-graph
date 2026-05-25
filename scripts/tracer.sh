@@ -143,13 +143,9 @@ do
                 ftrace)
                     val="${!OPTIND}"; OPTIND=$((OPTIND + 1))
                     add_ftrace_preset "$val";;
-                ftrace=*)
-                    add_ftrace_preset "${OPTARG#*=}";;
                 tracer)
                     val="${!OPTIND}"; OPTIND=$((OPTIND + 1))
                     add_bundled_tracer "$val";;
-                tracer=*)
-                    add_bundled_tracer "${OPTARG#*=}";;
                 help) print_help; exit 0;;
                 *) echo "Unknown option --$OPTARG" >&2; print_help; exit 1;;
             esac;;

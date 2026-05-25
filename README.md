@@ -64,17 +64,11 @@ $ parser/main.py trace_output --counter 'ss_*.counter'
 ## Ftrace event selection
 
 `tracer.sh` enables ftrace events for the duration of the target command and
-dumps the resulting trace into `ftrace.log`. There are three ways to pick which
-events to record:
-
-| Option             | Picks                                                |
-|--------------------|------------------------------------------------------|
-| `-e <event>`       | one raw event by name (e.g. `sched/sched_switch`), repeatable |
-| `--ftrace <preset>`| a curated group of related events, repeatable        |
-
-`--ftrace` is the convenience form: each preset expands to a small set of
-events that are usually wanted together. Presets are repeatable and may be
-mixed with `-e`:
+dumps the resulting trace into `ftrace.log`. Pick events with `-e <event>` for
+a single raw event by name (e.g. `sched/sched_switch`, repeatable), or with
+`--ftrace <preset>` for a curated group of related events. Each preset expands
+to a small set of events that are usually wanted together; presets are
+repeatable and may be mixed with `-e`:
 
 | Preset      | Events enabled                                                            |
 |-------------|---------------------------------------------------------------------------|
@@ -84,12 +78,11 @@ mixed with `-e`:
 | `irq`       | `irq/irq_handler_entry`, `irq/irq_handler_exit`, `irq/softirq_entry`, `irq/softirq_exit` |
 | `sched`     | `sched/sched_switch`                                                      |
 
-Both spellings are accepted: `--ftrace sched` and `--ftrace=sched`. Combine
-presets freely — repeat the option, or pass a comma-separated list:
+Combine presets freely — repeat the option, or pass a comma-separated list:
 
 ```
 $ sudo scripts/tracer.sh --ftrace sched --ftrace irq -o trace_output "sleep 5"
-$ sudo scripts/tracer.sh --ftrace sched,irq,bio    -o trace_output "sleep 5"
+$ sudo scripts/tracer.sh --ftrace sched,irq,bio      -o trace_output "sleep 5"
 ```
 
 ## Tracer helpers
@@ -97,18 +90,13 @@ $ sudo scripts/tracer.sh --ftrace sched,irq,bio    -o trace_output "sleep 5"
 `tracer.sh -t` accepts a *tracer*: a small daemon that collects some kind of
 useful, time-aligned data alongside the ftrace. Each `-t` is repeatable, runs
 in the background while the target command executes, and is stopped when the
-target exits. The `-t` slot is the general, customisable interface; the bundled
-helpers below also have a shorthand `--tracer <name>` form.
-
-### Convenience options
-
-For the bundled helpers you do not need to spell out the `-t` command and the
-parse step. The `--tracer <name>` options below start the matching sampler
-alongside the target and convert its raw file into a counter once the target
-exits, printing the exact `parser/main.py` command to plot the result:
+target exits. The bundled helpers below also have a shorthand `--tracer <name>`
+form that starts the matching sampler and converts its raw file into a counter
+once the target exits, printing the exact `parser/main.py` command to plot the
+result:
 
 ```
-$ sudo scripts/tracer.sh --ftrace sched --tracer ss --tracer netstat --tracer interrupts --tracer diskstats -o trace_output "sleep 5"
+$ sudo scripts/tracer.sh --ftrace sched --tracer ss,netstat,interrupts,diskstats -o trace_output "sleep 5"
 ```
 
 | Option                | Samples              | Produces                 |
@@ -118,10 +106,9 @@ $ sudo scripts/tracer.sh --ftrace sched --tracer ss --tracer netstat --tracer in
 | `--tracer interrupts` | `/proc/interrupts`   | `interrupts.counter`     |
 | `--tracer diskstats`  | `/proc/diskstats`    | `diskstats_*.counter`    |
 
-`--tracer` accepts the same comma-separated form (e.g. `--tracer ss,netstat`).
-
-The verbose `-t` form documented below stays available for custom helpers or
-non-default sampling periods.
+`--tracer` accepts the same comma-separated form as `--ftrace` (e.g.
+`--tracer ss,netstat`). The verbose `-t` form documented below stays available
+for custom helpers or non-default sampling periods.
 
 ### Network sampling
 
