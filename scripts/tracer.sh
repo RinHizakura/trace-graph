@@ -100,6 +100,7 @@ convenience bundled tracers (run a helper and convert it to a counter, repeatabl
     --tracer netstat     sample /proc/net/netstat          \n
     --tracer interrupts  sample /proc/interrupts           \n
     --tracer diskstats   sample /proc/diskstats            \n
+    --tracer nvme-smart  sample NVMe SMART log (all fields, nvme smart-log) \n
 \n
 kprobe call counters (one column per function in probe.counter, repeatable): \n
     --probe FUNC         add a kprobe on kernel symbol FUNC and emit its hit count \n
@@ -122,6 +123,8 @@ SAMPLE_SS=0
 SAMPLE_NETSTAT=0
 SAMPLE_IRQ=0
 SAMPLE_DISKSTATS=0
+SAMPLE_NVME=0
+NVME_DEVS=()
 PROBE_LIST=()
 add_ftrace_preset()
 {
@@ -152,6 +155,8 @@ add_bundled_tracer()
             netstat) SAMPLE_NETSTAT=1;;
             interrupts) SAMPLE_IRQ=1;;
             diskstats) SAMPLE_DISKSTATS=1;;
+            nvme-smart) SAMPLE_NVME=1;;
+            nvme-smart=*) SAMPLE_NVME=1; NVME_DEVS+=("${item#nvme-smart=}");;
             *) echo "Unknown --tracer name: $item" >&2; print_help; exit 1;;
         esac
     done
@@ -239,6 +244,15 @@ if [[ $SAMPLE_DISKSTATS -eq 1 ]]; then
     TRACERS+=("$HELPERS_DIR/diskstats/diskstats_sampler.sh -o $OUTPUT/diskstats.raw -p 1")
     POST_PARSE+=("$HELPERS_DIR/diskstats/diskstats_parser.py -i $OUTPUT/diskstats.raw -o $OUTPUT")
     COUNTER_GLOBS+=("'diskstats_*.counter'")
+fi
+if [[ $SAMPLE_NVME -eq 1 ]]; then
+    nvme_dev_args=""
+    for d in "${NVME_DEVS[@]}"; do
+        nvme_dev_args+=" -d $d"
+    done
+    TRACERS+=("$HELPERS_DIR/nvme/nvme_smart_sampler.sh -o $OUTPUT/nvme.raw -p 1$nvme_dev_args")
+    POST_PARSE+=("$HELPERS_DIR/nvme/nvme_smart_parser.py -i $OUTPUT/nvme.raw -o $OUTPUT")
+    COUNTER_GLOBS+=("'nvme_temp.counter'")
 fi
 if [[ ${#PROBE_LIST[@]} -gt 0 ]]; then
     probe_args=""

@@ -120,6 +120,7 @@ $ sudo scripts/tracer.sh --ftrace sched --tracer ss,netstat,interrupts,diskstats
 | `--tracer netstat`    | `/proc/net/netstat`  | `netstat.counter`        |
 | `--tracer interrupts` | `/proc/interrupts`   | `interrupts.counter`     |
 | `--tracer diskstats`  | `/proc/diskstats`    | `diskstats_*.counter`    |
+| `--tracer nvme-smart` | `nvme smart-log`     | `nvme_smart.counter`     |
 
 `--tracer` accepts the same comma-separated form as `--ftrace` (e.g.
 `--tracer ss,netstat`). The verbose `-t` form documented below stays available
@@ -237,3 +238,34 @@ samples `kprobe_profile` once per second, and removes the probes on exit.
 Symbols that the kernel does not expose to kprobes (inlined, `notrace`,
 missing) cause the helper to abort with an error before the target command
 runs.
+
+### NVMe SMART sampling
+
+NVMe SMART log fields are collected via `nvme smart-log -o json` (requires
+`nvme-cli`) in the same two-step shape. Every numeric field the device reports
+becomes a column. Each column is prefixed with the device name, e.g.
+`nvme0_temperature_C`, `nvme0_data_units_read`.
+
+1. **Sample raw snapshots.** By default all `/dev/nvme[0-9]` devices are
+   auto-detected. Pass `-d` to restrict to specific devices:
+
+   ```
+   $ sudo scripts/tracer.sh -o trace_output \
+       --tracer nvme-smart \
+       "sleep 5"
+   ```
+
+2. **Convert raw to general_counter.**
+
+   ```
+   $ helpers/nvme/nvme_smart_parser.py -i trace_output/nvme.raw -o trace_output
+   $ parser/main.py trace_output --counter 'nvme_smart.counter'
+   ```
+
+   To restrict to specific devices, pass them explicitly:
+
+   ```
+   $ sudo scripts/tracer.sh -o trace_output \
+       --tracer nvme-smart=/dev/nvme0 --tracer nvme-smart=/dev/nvme1 \
+       "sleep 5"
+   ```
