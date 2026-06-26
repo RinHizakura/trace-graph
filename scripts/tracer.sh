@@ -252,7 +252,7 @@ if [[ $SAMPLE_NVME -eq 1 ]]; then
     done
     TRACERS+=("$HELPERS_DIR/nvme/nvme_smart_sampler.sh -o $OUTPUT/nvme.raw -p 1$nvme_dev_args")
     POST_PARSE+=("$HELPERS_DIR/nvme/nvme_smart_parser.py -i $OUTPUT/nvme.raw -o $OUTPUT")
-    COUNTER_GLOBS+=("'nvme_temp.counter'")
+    COUNTER_GLOBS+=("'nvme_smart.counter'")
 fi
 if [[ ${#PROBE_LIST[@]} -gt 0 ]]; then
     probe_args=""
