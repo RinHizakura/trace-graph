@@ -199,8 +199,12 @@ do
             TRACERS+=("$OPTARG");;
         h)
             print_help; exit 0;;
-        ?)
-            print_help; exit 1;;
+        :)
+            echo "Error: option -$OPTARG requires an argument" >&2
+            exit 1;;
+        \?)
+            echo "Error: unknown option -$OPTARG" >&2
+            exit 1;;
     esac
 done
 
@@ -208,7 +212,7 @@ shift $(($OPTIND - 1))
 CMD=$*
 
 if [ "$CMD" == "" ]; then
-    print_help
+    echo "Error: no command specified" >&2
     exit 1
 fi
 
