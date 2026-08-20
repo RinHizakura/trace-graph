@@ -80,8 +80,9 @@ function post_parse()
 
 function print_help()
 {
-    usage="$(basename "$0") [-h] [-o output] [-e event] [-p] [-t cmd] [--ftrace preset] [--tracer name] [--probe func] \n
+    usage="$(basename "$0") [-h] [-o output] [-e event] [-p] [-t cmd] [--ftrace preset] [--tracer name] [--probe func] [--] cmd... \n
 where:                                                 \n
+    --  end of options; everything after it is the target command \n
     -h  show this help text                            \n
     -o  specify the output directory (default /tmp/trace_log) \n
     -e  select the event for ftrace                    \n
@@ -209,9 +210,9 @@ do
 done
 
 shift $(($OPTIND - 1))
-CMD=$*
+CMD=("$@")
 
-if [ "$CMD" == "" ]; then
+if [ ${#CMD[@]} -eq 0 ]; then
     echo "Error: no command specified" >&2
     exit 1
 fi
@@ -285,7 +286,7 @@ fi
 # that SIGSTOPs itself just before exec'ing $CMD so we get the cmd's real
 # PID into $CPID (exec keeps the PID) and have a precise moment to write
 # the ftrace pid filter and capture START_TS. SIGCONT releases it.
-(exec bash -c 'kill -STOP $$; exec "$@"' _ $CMD) &
+(exec bash -c 'kill -STOP $$; exec "$@"' _ "${CMD[@]}") &
 CPID=$!
 
 # Wait until the child is actually stopped so set_event_pid is written
@@ -295,7 +296,7 @@ while :; do
     state=$(awk '{print $3}' "/proc/$CPID/stat" 2>/dev/null) || break
     [ "$state" = "T" ] && break
 done
-echo "Prepared command '$CMD' (pid=$CPID), waiting for tracer setup..."
+echo "Prepared command '${CMD[*]}' (pid=$CPID), waiting for tracer setup..."
 
 if [[ $FTRACE -eq 1 ]]; then
     ftrace_sampler start $CPID
@@ -349,7 +350,7 @@ set +e
 wait $CPID
 ret=$?
 set -e
-echo "Command '$CMD' finished. Return code: $ret"
+echo "Command '${CMD[*]}' finished. Return code: $ret"
 
 for pid in "${TRACER_PIDS[@]}"; do
     kill "$pid" 2>/dev/null || true
