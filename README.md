@@ -22,7 +22,7 @@ $ pip install perfetto
 
 Unittest command (requires [`pytest`](https://pypi.org/project/pytest/), `pip install pytest`):
 ```
-$ pytest ./parser/test_ftrace_parser.py -v
+$ pytest ./parser/test_parser.py -v
 ```
 
 ## Why trace-graph?
@@ -126,6 +126,7 @@ $ sudo scripts/tracer.sh --ftrace sched --tracer ss,netstat,interrupts,diskstats
 | `--tracer netstat`    | `/proc/net/netstat`  | `netstat.counter`        |
 | `--tracer interrupts` | `/proc/interrupts`   | `interrupts.counter`     |
 | `--tracer diskstats`  | `/proc/diskstats`    | `diskstats_*.counter`    |
+| `--tracer dmesg`      | `/dev/kmsg` stream   | `dmesg.log` (auto-plotted as instant events on a `dmesg` track) |
 | `--tracer nvme-smart` | `nvme smart-log`     | `nvme_smart.counter`     |
 
 `--tracer` accepts the same comma-separated form as `--ftrace` (e.g.

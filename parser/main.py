@@ -4,12 +4,14 @@ import argparse
 import glob
 import os
 
+from dmesg_parser import parse_dmesg
 from ftrace_parser import parse_ftrace
 from general_counter_parser import parse_general_counter_file
 from trace_writer import PerfettoTraceFile
 
 
 FTRACE_FILE = "ftrace.log"
+DMESG_FILE = "dmesg.log"
 START_TS_FILE = "start_ts"
 
 
@@ -68,7 +70,9 @@ if __name__ == "__main__":
             exit(f"Error: --counter pattern matched nothing: {pat}")
         counter_fs.extend(matched)
 
-    if not os.path.exists(ftrace_f) and not counter_fs:
+    dmesg_f = os.path.join(input_dir, DMESG_FILE)
+
+    if not os.path.exists(ftrace_f) and not os.path.exists(dmesg_f) and not counter_fs:
         exit(f"Error: no known log files found under {input_dir}")
 
     start_ts = _read_start_ts(input_dir)
@@ -78,6 +82,10 @@ if __name__ == "__main__":
     if os.path.exists(ftrace_f):
         with open(ftrace_f, "r") as f:
             parse_ftrace(trace, f, start_ts=start_ts)
+
+    if os.path.exists(dmesg_f):
+        with open(dmesg_f, "r", errors="replace") as f:
+            parse_dmesg(trace, f, start_ts=start_ts)
 
     for p in counter_fs:
         parse_general_counter_file(trace, p, start_ts=start_ts)

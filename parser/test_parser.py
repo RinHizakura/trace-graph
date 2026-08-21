@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""Smallest check that fails if the ftrace event handlers break."""
+"""Smallest check that fails if the ftrace/dmesg event handlers break."""
+from dmesg_parser import parse_dmesg_line
 from ftrace_parser import (
     DurationTracker,
     handle_sched_swtich_event,
@@ -96,6 +97,16 @@ def test_softirq():
     assert exit_info == ("BLOCK", 200, 60), exit_info
 
 
+def test_dmesg():
+    # /dev/kmsg record: pri 6 = facility 0, severity 6 (info)
+    parsed = parse_dmesg_line("6,1234,71167229495,-;nvme nvme0: I/O tag 10 timeout\n")
+    assert parsed == (6, 71167.229495, "nvme nvme0: I/O tag 10 timeout"), parsed
+    # facility folds away: pri 30 = facility 3, severity 6
+    assert parse_dmesg_line("30,1,5000000,-;msg")[0] == 6
+    # continuation lines are skipped
+    assert parse_dmesg_line(" SUBSYSTEM=pci\n") is None
+
+
 if __name__ == "__main__":
     test_sched_switch()
     test_cpu_idle()
@@ -103,4 +114,5 @@ if __name__ == "__main__":
     test_nvme()
     test_irq_handler()
     test_softirq()
+    test_dmesg()
     print("ok")
