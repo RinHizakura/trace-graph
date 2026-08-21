@@ -115,7 +115,7 @@ def handle_bio_end_event(info, duration, timestamp):
     )
     key = f"{major}_{minor}_{sector}_{nr_sector}"
     exit_info = duration.exit(f"block_rq-{key}", timestamp)
-    return exit_info
+    return f"{major},{minor}", exit_info
 
 
 def handle_nvme_setup_event(info, task, duration, timestamp):
@@ -184,7 +184,6 @@ def parse_ftrace(trace, file, start_ts=None):
             "irq_handler",
             "softirq",
             "device_pm_callback",
-            "block_rq",
         ]
     )
 
@@ -193,6 +192,12 @@ def parse_ftrace(trace, file, start_ts=None):
     # Record the max CPU number during parsing of the ftrace event
     cpu_max = 0
     duration = DurationTracker()
+
+    # Overlapping request slices (many commands in flight on one queue or
+    # device) buffered here and emitted onto sibling "lane" tracks at the
+    # end: Perfetto's track model only nests slices, two overlapping slices
+    # on one track render with garbage widths.
+    pending = {}
 
     for line in file:
         sample = line.strip()
@@ -243,7 +248,7 @@ def parse_ftrace(trace, file, start_ts=None):
                 goto_next = True
             elif event == "block_rq_complete":
                 event = "block_rq"
-                exit_info = handle_bio_end_event(info, duration, timestamp)
+                track_name, exit_info = handle_bio_end_event(info, duration, timestamp)
         elif event == "nvme_setup_cmd" or event == "nvme_complete_rq":
             if event == "nvme_setup_cmd":
                 event = "nvme_cmd"
@@ -277,7 +282,13 @@ def parse_ftrace(trace, file, start_ts=None):
             continue
 
         if track_name:
-            # Events tracked per hardware queue rather than per CPU/thread
+            # Events tracked per hardware queue/device rather than per
+            # CPU/thread
+            if exit_info:
+                pending.setdefault((event, track_name), []).append(
+                    (*exit_info, info)
+                )
+                continue
             track_key = f"{event}/{track_name}"
             track_uuid = trace.make_track(track_key, name=track_name, parent_key=event)
         elif event in cpu_track_events:
@@ -305,3 +316,30 @@ def parse_ftrace(trace, file, start_ts=None):
             trace.add_counter_event(counter_uuid, timestamp, value)
         else:
             trace.add_instant_event(track_uuid, name, timestamp, info)
+
+    emit_lanes(trace, pending)
+
+
+def emit_lanes(trace, pending):
+    """Emit buffered overlapping slices onto per-lane sibling tracks.
+
+    Greedy interval partitioning: sort by start time, place each slice on
+    the first lane that is already free, open a new lane otherwise.
+    """
+    for (event, track_name), slices in pending.items():
+        base_key = f"{event}/{track_name}"
+        trace.make_track(base_key, name=track_name, parent_key=event)
+        slices.sort(key=lambda s: s[1])
+        lane_ends = []
+        for slice_name, start, dur, info in slices:
+            for i, end in enumerate(lane_ends):
+                if end < start:
+                    lane_ends[i] = start + dur
+                    break
+            else:
+                i = len(lane_ends)
+                lane_ends.append(start + dur)
+            track_uuid = trace.make_track(
+                f"{base_key}/{i}", name=f"{i}", parent_key=base_key
+            )
+            trace.add_complete_event(track_uuid, slice_name, start, dur, info)

@@ -49,7 +49,8 @@ def test_bio():
     handle_bio_start_event(
         "179,0 WFSM 4096 () 58339640 + 8 [kworker/0:1H]", "kworker/0:1H-152", d, 100
     )
-    exit_info = handle_bio_end_event("179,0 WFSM () 58339640 + 8 [0]", d, 250)
+    track, exit_info = handle_bio_end_event("179,0 WFSM () 58339640 + 8 [0]", d, 250)
+    assert track == "179,0", track
     assert exit_info == ("kworker/0:1H-152", 100, 150), exit_info
 
 
