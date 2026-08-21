@@ -22,6 +22,10 @@ function ftrace_sampler()
             echo 0 > $SYSFS_TRACE/events/enable
             echo 0 > $SYSFS_TRACE/tracing_on
 
+            # Large per-CPU buffer so heavy event rates don't
+            # overwrite the ring buffer mid-trace.
+            echo 100000 > $SYSFS_TRACE/buffer_size_kb
+
             # Use the boot clock so ftrace timestamps line up with /proc/uptime
             # (the clock the samplers and START_TS use); the trace_clock write
             # must happen while the buffer is empty.
@@ -62,6 +66,8 @@ function ftrace_sampler()
             echo nop > $SYSFS_TRACE/current_tracer
             echo 0 > $SYSFS_TRACE/events/enable
             echo local > $SYSFS_TRACE/trace_clock
+            # Shrink the buffer back so the RAM isn't held between traces
+            echo 1408 > $SYSFS_TRACE/buffer_size_kb
             ;;
     esac
 }
