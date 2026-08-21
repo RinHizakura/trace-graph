@@ -79,7 +79,7 @@ def handle_cpu_idle_event(info):
 
 def handle_bio_start_event(info, cpu, duration, timestamp):
     d = _findall_first(
-        r"(\d+),(\d+) (\w+) (\d+) \((\w*)\) (\d+) \+ (\d+) [\w,]+ \[([\w/:-]+)\]",
+        r"(\d+),(\d+) (\w+) (\d+) \((\w*)\) (\d+) \+ (\d+) (?:[\w,]+ )?\[([\w/:-]+)\]",
         info,
     )
     major, minor, rwbs, byte, cmd, sector, nr_sector, comm = (
@@ -99,7 +99,7 @@ def handle_bio_start_event(info, cpu, duration, timestamp):
 
 def handle_bio_end_event(info, cpu, duration, timestamp):
     d = _findall_first(
-        r"(\d+),(\d+) (\w+) \((\w*)\) (\d+) \+ (\d+) [\w,]+ \[(\d+)\]", info
+        r"(\d+),(\d+) (\w+) \((\w*)\) (\d+) \+ (\d+) (?:[\w,]+ )?\[(\d+)\]", info
     )
     major, minor, rwbs, cmd, sector, nr_sector, err = (
         int(d[0]),
@@ -238,8 +238,10 @@ def parse_ftrace(trace, file, start_ts=None):
                 track_key, name=f"CPU{cpu}", parent_key=event
             )
         else:
-            track_key = f"thread:{process_id}"
-            track_uuid = trace.make_track(track_key, name=f"{name}-{process_id}")
+            track_key = f"{event}/thread:{process_id}"
+            track_uuid = trace.make_track(
+                track_key, name=f"{name}-{process_id}", parent_key=event
+            )
 
         if exit_info:
             (slice_name, start, dur) = exit_info
