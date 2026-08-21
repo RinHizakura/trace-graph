@@ -77,7 +77,7 @@ def handle_cpu_idle_event(info):
     return (f"CPU{cpu_id:03d}", state)
 
 
-def handle_bio_start_event(info, cpu, duration, timestamp):
+def handle_bio_start_event(info, duration, timestamp):
     d = _findall_first(
         r"(\d+),(\d+) (\w+) (\d+) \((\w*)\) (\d+) \+ (\d+) (?:[\w,]+ )?\[([\w/:-]+)\]",
         info,
@@ -92,12 +92,14 @@ def handle_bio_start_event(info, cpu, duration, timestamp):
         int(d[6]),
         d[7],
     )
+    # No cpu in the key: a request is usually completed on a different CPU
+    # (IRQ affinity) than the one that inserted it.
     key = f"{major}_{minor}_{sector}_{nr_sector}"
     data = f"Comm={comm}"
-    duration.entry(f"block_rq-{key}@{cpu}", (data, timestamp))
+    duration.entry(f"block_rq-{key}", (data, timestamp))
 
 
-def handle_bio_end_event(info, cpu, duration, timestamp):
+def handle_bio_end_event(info, duration, timestamp):
     d = _findall_first(
         r"(\d+),(\d+) (\w+) \((\w*)\) (\d+) \+ (\d+) (?:[\w,]+ )?\[(\d+)\]", info
     )
@@ -111,8 +113,32 @@ def handle_bio_end_event(info, cpu, duration, timestamp):
         int(d[6]),
     )
     key = f"{major}_{minor}_{sector}_{nr_sector}"
-    exit_info = duration.exit(f"block_rq-{key}@{cpu}", timestamp)
+    exit_info = duration.exit(f"block_rq-{key}", timestamp)
     return exit_info
+
+
+def handle_nvme_setup_event(info, duration, timestamp):
+    # nvme0: disk=nvme0n1, qid=1, cmdid=8202, nsid=1, flags=0x0, meta=0x0,
+    # cmd=(nvme_cmd_read slba=190896, len=7, ...)
+    # Admin commands have no "disk=..." part.
+    d = _findall_first(
+        r"nvme(\d+): (?:disk=\S+, )?qid=(\d+), cmdid=(\d+), .*cmd=\((\S+)", info
+    )
+    ctrl, qid, cmdid, opcode = int(d[0]), int(d[1]), int(d[2]), d[3]
+    # ponytail: cmdid low 12 bits are the blk-mq tag, upper bits are a
+    # generation counter (kernel >= 5.17; older kernels have no genctr so
+    # the mask is a no-op).
+    tag = cmdid & 0xFFF
+    data = f"{opcode} tag={tag}"
+    duration.entry(f"nvme_cmd-{ctrl}_{qid}_{cmdid}", (data, timestamp))
+
+
+def handle_nvme_complete_event(info, duration, timestamp):
+    # nvme0: disk=nvme0n1, qid=1, cmdid=8202, res=0x0, retries=0, ...
+    d = _findall_first(r"nvme(\d+): (?:disk=\S+, )?qid=(\d+), cmdid=(\d+)", info)
+    ctrl, qid, cmdid = int(d[0]), int(d[1]), int(d[2])
+    exit_info = duration.exit(f"nvme_cmd-{ctrl}_{qid}_{cmdid}", timestamp)
+    return f"nvme{ctrl}-q{qid}", exit_info
 
 
 def handle_irq_handler_start_event(info, cpu, duration, timestamp):
@@ -199,6 +225,7 @@ def parse_ftrace(trace, file, start_ts=None):
         counter = None
         goto_next = False
         exit_info = None
+        track_name = None
         if event == "sched_switch":
             exit_info = handle_sched_swtich_event(info, cpu, duration, timestamp)
             goto_next = False if exit_info else True
@@ -207,11 +234,21 @@ def parse_ftrace(trace, file, start_ts=None):
         elif "block_rq" in event:
             if event == "block_rq_insert":
                 event = "block_rq"
-                handle_bio_start_event(info, cpu, duration, timestamp)
+                handle_bio_start_event(info, duration, timestamp)
                 goto_next = True
             elif event == "block_rq_complete":
                 event = "block_rq"
-                exit_info = handle_bio_end_event(info, cpu, duration, timestamp)
+                exit_info = handle_bio_end_event(info, duration, timestamp)
+        elif event == "nvme_setup_cmd" or event == "nvme_complete_rq":
+            if event == "nvme_setup_cmd":
+                event = "nvme_cmd"
+                handle_nvme_setup_event(info, duration, timestamp)
+                goto_next = True
+            else:
+                event = "nvme_cmd"
+                track_name, exit_info = handle_nvme_complete_event(
+                    info, duration, timestamp
+                )
         elif "irq_handler" in event:
             if event == "irq_handler_entry":
                 event = "irq_handler"
@@ -232,7 +269,11 @@ def parse_ftrace(trace, file, start_ts=None):
         if goto_next:
             continue
 
-        if event in cpu_track_events:
+        if track_name:
+            # Events tracked per hardware queue rather than per CPU/thread
+            track_key = f"{event}/{track_name}"
+            track_uuid = trace.make_track(track_key, name=track_name, parent_key=event)
+        elif event in cpu_track_events:
             track_key = f"{event}/CPU{cpu}"
             track_uuid = trace.make_track(
                 track_key, name=f"CPU{cpu}", parent_key=event

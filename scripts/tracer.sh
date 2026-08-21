@@ -94,6 +94,7 @@ convenience ftrace presets (named ftrace event groups, repeatable): \n
     --ftrace bio       block_rq_insert / block_rq_complete         \n
     --ftrace cpuidle   power/cpu_idle                              \n
     --ftrace irq       irq + softirq entry/exit                    \n
+    --ftrace nvme      nvme_setup_cmd / nvme_complete_rq           \n
     --ftrace sched     sched/sched_switch                          \n
 \n
 convenience bundled tracers (run a helper and convert it to a counter, repeatable): \n
@@ -139,6 +140,7 @@ add_ftrace_preset()
             cpuidle) EVENT_LIST+=("power/cpu_idle");;
             irq) EVENT_LIST+=("irq/irq_handler_entry" "irq/irq_handler_exit" \
                               "irq/softirq_entry" "irq/softirq_exit");;
+            nvme) EVENT_LIST+=("nvme/nvme_setup_cmd" "nvme/nvme_complete_rq");;
             sched) EVENT_LIST+=("sched/sched_switch");;
             *) echo "Unknown --ftrace preset: $item" >&2; print_help; exit 1;;
         esac
