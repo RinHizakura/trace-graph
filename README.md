@@ -88,10 +88,10 @@ repeatable and may be mixed with `-e`:
 | Preset      | Events enabled                                                            |
 |-------------|---------------------------------------------------------------------------|
 | `all`       | every event the kernel exposes (large traces)                             |
-| `bio`       | `block/block_rq_insert`, `block/block_rq_complete`                        |
+| `bio`       | `block/block_rq_issue`, `block/block_rq_complete`                         |
 | `cpuidle`   | `power/cpu_idle`                                                          |
 | `irq`       | `irq/irq_handler_entry`, `irq/irq_handler_exit`, `irq/softirq_entry`, `irq/softirq_exit` |
-| `nvme`      | `nvme/nvme_setup_cmd`, `nvme/nvme_complete_rq` (per-queue tracks, slice name carries the blk-mq tag) |
+| `nvme`      | `nvme/nvme_setup_cmd`, `nvme/nvme_complete_rq`                            |
 | `sched`     | `sched/sched_switch`                                                      |
 
 Combine presets freely — repeat the option, or pass a comma-separated list:

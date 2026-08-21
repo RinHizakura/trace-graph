@@ -91,7 +91,7 @@ where:                                                 \n
 \n
 convenience ftrace presets (named ftrace event groups, repeatable): \n
     --ftrace all       enable every ftrace event                   \n
-    --ftrace bio       block_rq_insert / block_rq_complete         \n
+    --ftrace bio       block_rq_issue / block_rq_complete          \n
     --ftrace cpuidle   power/cpu_idle                              \n
     --ftrace irq       irq + softirq entry/exit                    \n
     --ftrace nvme      nvme_setup_cmd / nvme_complete_rq           \n
@@ -136,7 +136,7 @@ add_ftrace_preset()
         [ -z "$item" ] && continue
         case "$item" in
             all) ALL_EVENTS=1;;
-            bio) EVENT_LIST+=("block/block_rq_insert" "block/block_rq_complete");;
+            bio) EVENT_LIST+=("block/block_rq_issue" "block/block_rq_complete");;
             cpuidle) EVENT_LIST+=("power/cpu_idle");;
             irq) EVENT_LIST+=("irq/irq_handler_entry" "irq/irq_handler_exit" \
                               "irq/softirq_entry" "irq/softirq_exit");;

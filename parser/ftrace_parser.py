@@ -232,7 +232,7 @@ def parse_ftrace(trace, file, start_ts=None):
         elif event == "cpu_idle":
             counter = handle_cpu_idle_event(info)
         elif "block_rq" in event:
-            if event == "block_rq_insert":
+            if event == "block_rq_issue":
                 event = "block_rq"
                 handle_bio_start_event(info, duration, timestamp)
                 goto_next = True
