@@ -20,6 +20,11 @@ The parser depends on the [`perfetto`](https://pypi.org/project/perfetto/) Pytho
 $ pip install perfetto
 ```
 
+Unittest command (requires [`pytest`](https://pypi.org/project/pytest/), `pip install pytest`):
+```
+$ pytest ./parser/test_ftrace_parser.py -v
+```
+
 ## Why trace-graph?
 
 Perfetto already accepts the ftrace format natively, and for typical
