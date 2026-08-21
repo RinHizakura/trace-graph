@@ -59,7 +59,7 @@ def handle_sched_swtich_event(info, cpu, duration, timestamp):
 
     # Ignore the swapper thread
     if not "swapper" in cur:
-        duration.entry(f"{event}-{cur_pid}@{cpu}", (cur, timestamp))
+        duration.entry(f"{event}-{cur_pid}@{cpu}", (f"{cur}-{cur_pid}", timestamp))
 
     if not "swapper" in prev:
         return duration.exit(f"{event}-{prev_pid}@{cpu}", timestamp)
@@ -77,7 +77,7 @@ def handle_cpu_idle_event(info):
     return (f"CPU{cpu_id:03d}", state)
 
 
-def handle_bio_start_event(info, duration, timestamp):
+def handle_bio_start_event(info, task, duration, timestamp):
     d = _findall_first(
         r"(\d+),(\d+) (\w+) (\d+) \((\w*)\) (\d+) \+ (\d+) (?:[\w,]+ )?\[([\w/:-]+)\]",
         info,
@@ -95,7 +95,9 @@ def handle_bio_start_event(info, duration, timestamp):
     # No cpu in the key: a request is usually completed on a different CPU
     # (IRQ affinity) than the one that inserted it.
     key = f"{major}_{minor}_{sector}_{nr_sector}"
-    duration.entry(f"block_rq-{key}", (comm, timestamp))
+    # block_rq_issue fires in the submitting task's context, so the ftrace
+    # line prefix (comm-pid) identifies who issued the request.
+    duration.entry(f"block_rq-{key}", (task, timestamp))
 
 
 def handle_bio_end_event(info, duration, timestamp):
@@ -116,7 +118,7 @@ def handle_bio_end_event(info, duration, timestamp):
     return exit_info
 
 
-def handle_nvme_setup_event(info, duration, timestamp):
+def handle_nvme_setup_event(info, task, duration, timestamp):
     # nvme0: disk=nvme0n1, qid=1, cmdid=8202, nsid=1, flags=0x0, meta=0x0,
     # cmd=(nvme_cmd_read slba=190896, len=7, ...)
     # Admin commands have no "disk=..." part.
@@ -128,7 +130,9 @@ def handle_nvme_setup_event(info, duration, timestamp):
     # generation counter (kernel >= 5.17; older kernels have no genctr so
     # the mask is a no-op).
     tag = cmdid & 0xFFF
-    data = f"{opcode} tag={tag}"
+    # nvme_setup_cmd fires in the submitting task's context, so the ftrace
+    # line prefix (comm-pid) identifies who issued the command.
+    data = f"{opcode} tag={tag} {task}"
     duration.entry(f"nvme_cmd-{ctrl}_{qid}_{cmdid}", (data, timestamp))
 
 
@@ -233,7 +237,9 @@ def parse_ftrace(trace, file, start_ts=None):
         elif "block_rq" in event:
             if event == "block_rq_issue":
                 event = "block_rq"
-                handle_bio_start_event(info, duration, timestamp)
+                handle_bio_start_event(
+                    info, f"{name}-{process_id}", duration, timestamp
+                )
                 goto_next = True
             elif event == "block_rq_complete":
                 event = "block_rq"
@@ -241,7 +247,9 @@ def parse_ftrace(trace, file, start_ts=None):
         elif event == "nvme_setup_cmd" or event == "nvme_complete_rq":
             if event == "nvme_setup_cmd":
                 event = "nvme_cmd"
-                handle_nvme_setup_event(info, duration, timestamp)
+                handle_nvme_setup_event(
+                    info, f"{name}-{process_id}", duration, timestamp
+                )
                 goto_next = True
             else:
                 event = "nvme_cmd"

@@ -34,7 +34,7 @@ def test_sched_switch():
         d,
         180,
     )
-    assert exit_info == ("fio", 100, 80), exit_info
+    assert exit_info == ("fio-1234", 100, 80), exit_info
 
 
 def test_cpu_idle():
@@ -46,9 +46,11 @@ def test_cpu_idle():
 def test_bio():
     # issue on CPU0, complete on CPU4 must still match (no cpu in key)
     d = DurationTracker()
-    handle_bio_start_event("179,0 WFSM 4096 () 58339640 + 8 [kworker/0:1H]", d, 100)
+    handle_bio_start_event(
+        "179,0 WFSM 4096 () 58339640 + 8 [kworker/0:1H]", "kworker/0:1H-152", d, 100
+    )
     exit_info = handle_bio_end_event("179,0 WFSM () 58339640 + 8 [0]", d, 250)
-    assert exit_info == ("kworker/0:1H", 100, 150), exit_info
+    assert exit_info == ("kworker/0:1H-152", 100, 150), exit_info
 
 
 def test_nvme():
@@ -57,6 +59,7 @@ def test_nvme():
     handle_nvme_setup_event(
         "nvme0: disk=nvme0n1, qid=1, cmdid=8202, nsid=1, flags=0x0, meta=0x0, "
         "cmd=(nvme_cmd_read slba=190896, len=7, ctrl=0x0, dsmgmt=0, reftag=0)",
+        "fio-59507",
         d,
         100,
     )
@@ -66,11 +69,12 @@ def test_nvme():
         400,
     )
     assert track == "nvme0-q1", track
-    assert exit_info == ("nvme_cmd_read tag=10", 100, 300), exit_info
+    assert exit_info == ("nvme_cmd_read tag=10 fio-59507", 100, 300), exit_info
 
     handle_nvme_setup_event(
         "nvme0: qid=0, cmdid=4106, nsid=0, flags=0x0, meta=0x0, "
         "cmd=(nvme_admin_get_log_page cdw10=...)",
+        "nvme-1234",
         d,
         500,
     )
@@ -78,7 +82,7 @@ def test_nvme():
         "nvme0: qid=0, cmdid=4106, res=0x0, retries=0, flags=0x0, status=0x0", d, 600
     )
     assert track == "nvme0-q0", track
-    assert exit_info == ("nvme_admin_get_log_page tag=10", 500, 100), exit_info
+    assert exit_info == ("nvme_admin_get_log_page tag=10 nvme-1234", 500, 100), exit_info
 
 
 def test_irq_handler():
