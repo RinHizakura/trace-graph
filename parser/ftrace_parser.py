@@ -95,8 +95,7 @@ def handle_bio_start_event(info, duration, timestamp):
     # No cpu in the key: a request is usually completed on a different CPU
     # (IRQ affinity) than the one that inserted it.
     key = f"{major}_{minor}_{sector}_{nr_sector}"
-    data = f"Comm={comm}"
-    duration.entry(f"block_rq-{key}", (data, timestamp))
+    duration.entry(f"block_rq-{key}", (comm, timestamp))
 
 
 def handle_bio_end_event(info, duration, timestamp):

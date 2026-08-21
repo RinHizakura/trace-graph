@@ -13,7 +13,7 @@ d = DurationTracker()
 # bio: insert on CPU0, complete on CPU4 must still match (no cpu in key)
 handle_bio_start_event("179,0 WFSM 4096 () 58339640 + 8 [kworker/0:1H]", d, 100)
 exit_info = handle_bio_end_event("179,0 WFSM () 58339640 + 8 [0]", d, 250)
-assert exit_info == ("Comm=kworker/0:1H", 100, 150), exit_info
+assert exit_info == ("kworker/0:1H", 100, 150), exit_info
 
 # nvme: cmdid 8202 = genctr 2 << 12 | tag 10; io and admin (no disk=) forms
 handle_nvme_setup_event(
